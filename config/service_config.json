@@ -1,0 +1,18 @@
+{
+    "backup":
+    {
+        "enabled": true,
+        "interval": 1800,
+        "retention": 20,
+        "backup_dir": "backups"
+    },
+    "dbhealthchecker":
+    {
+        "enabled": true,
+        "auto_rollover": true,
+        "shutdown_on_failure": true,
+        "leniency": 3,
+        "interval": 60,
+        "backup_dir": "backups"
+    }
+}
