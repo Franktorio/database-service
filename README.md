@@ -1,8 +1,6 @@
 # Database Service
 
-Async FastAPI + PostgreSQL service for storing and managing API keys and database-backed application data, with API-key auth, permission levels, rate limiting, backups, health checks, and migration tooling.
-
-This tool is made to quickly deploy an easy-to-expand API based backend with easy expandability to fit any use case.
+Async FastAPI + PostgreSQL service for storing and managing API keys and database-backed application data, with API-key auth, permission levels, rate limiting, backups, health checks, and migration tooling. This tool is made to quickly deploy an easy-to-expand API based database backend.
 
 ## What This Service Does
 
