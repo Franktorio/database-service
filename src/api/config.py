@@ -1,3 +1,4 @@
+from src.services.logging import log_message
 # ~/src/api/config.py
 # Configuration settings for the API service.
 
@@ -17,4 +18,4 @@ PERM_LEVEL_MAP = {
     SUPER_ADMIN_LEVEL: "SUPER_ADMIN",
 }
 
-print(f"[DEBUG] [{PRINT_PREFIX}] Permission levels loaded: {PERM_LEVEL_MAP}")
+log_message(f"[DEBUG] [{PRINT_PREFIX}] Permission levels loaded: {PERM_LEVEL_MAP}")

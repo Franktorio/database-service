@@ -27,6 +27,7 @@ from config.loader import (
 )
 from src.models.base import Base
 import src.models.tables 
+from src.services.logging import log_message
 
 CHUNK_SIZE = 1000
 
@@ -144,8 +145,8 @@ def main() -> None:
 	temp_db = f"{source_db}_tmp_migration_{timestamp}"
 	backup_db = f"{source_db}_pre_migration_{timestamp}"
 
-	print(f"[INFO] [{PRINT_PREFIX}] Starting migration for database '{source_db}'.")
-	print(f"[DEBUG] [{PRINT_PREFIX}] Temporary database will be '{temp_db}'.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Starting migration for database '{source_db}'.")
+	log_message(f"[DEBUG] [{PRINT_PREFIX}] Temporary database will be '{temp_db}'.")
 
 	admin_conn = _connect("postgres", autocommit=True)
 	source_conn = None
@@ -154,10 +155,10 @@ def main() -> None:
 	try:
 		with admin_conn.cursor() as cursor:
 			cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(temp_db)))
-		print(f"[INFO] [{PRINT_PREFIX}] Created temporary database '{temp_db}'.")
+		log_message(f"[INFO] [{PRINT_PREFIX}] Created temporary database '{temp_db}'.")
 
 		asyncio.run(_create_schema_for_database(temp_db))
-		print(f"[INFO] [{PRINT_PREFIX}] Created latest schema in temporary database.")
+		log_message(f"[INFO] [{PRINT_PREFIX}] Created latest schema in temporary database.")
 
 		source_conn = _connect(source_db)
 		target_conn = _connect(temp_db)
@@ -168,7 +169,7 @@ def main() -> None:
 		source_tables = set(_list_public_tables(source_conn))
 		target_tables = set(_list_public_tables(target_conn))
 		common_tables = sorted(source_tables & target_tables)
-		print(f"[INFO] [{PRINT_PREFIX}] Found {len(common_tables)} table(s) to evaluate for migration.")
+		log_message(f"[INFO] [{PRINT_PREFIX}] Found {len(common_tables)} table(s) to evaluate for migration.")
 
 		migrated_tables = 0
 		total_rows = 0
@@ -177,12 +178,12 @@ def main() -> None:
 			if cols:
 				migrated_tables += 1
 				total_rows += row_count
-				print(
+				log_message(
 					f"[INFO] [{PRINT_PREFIX}] Migrated {row_count} row(s) from table '{table_name}' "
 					f"using {len(cols)} compatible column(s)."
 				)
 			else:
-				print(
+				log_message(
 					f"[WARNING] [{PRINT_PREFIX}] Skipped data copy for table '{table_name}'; "
 					"no compatible columns found."
 				)
@@ -211,15 +212,15 @@ def main() -> None:
 				)
 			)
 
-		print(f"[INFO] [{PRINT_PREFIX}] Migration swap complete.")
-		print(f"[INFO] [{PRINT_PREFIX}] Previous database kept as '{backup_db}'.")
-		print(
+		log_message(f"[INFO] [{PRINT_PREFIX}] Migration swap complete.")
+		log_message(f"[INFO] [{PRINT_PREFIX}] Previous database kept as '{backup_db}'.")
+		log_message(
 			f"[INFO] [{PRINT_PREFIX}] Migration summary: {migrated_tables} table(s), "
 			f"{total_rows} total row(s) copied."
 		)
 
 	except Exception as exc:
-		print(f"[ERROR] [{PRINT_PREFIX}] Migration failed: {exc}")
+		log_message(f"[ERROR] [{PRINT_PREFIX}] Migration failed: {exc}")
 
 		if target_conn is not None:
 			target_conn.rollback()
@@ -231,9 +232,9 @@ def main() -> None:
 			_terminate_connections(admin_conn, temp_db)
 			with admin_conn.cursor() as cursor:
 				cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(temp_db)))
-			print(f"[INFO] [{PRINT_PREFIX}] Removed temporary database '{temp_db}'.")
+			log_message(f"[INFO] [{PRINT_PREFIX}] Removed temporary database '{temp_db}'.")
 		except Exception as cleanup_exc:
-			print(f"[WARNING] [{PRINT_PREFIX}] Cleanup failed for temporary DB '{temp_db}': {cleanup_exc}")
+			log_message(f"[WARNING] [{PRINT_PREFIX}] Cleanup failed for temporary DB '{temp_db}': {cleanup_exc}")
 
 		raise
 	finally:
@@ -242,3 +243,4 @@ def main() -> None:
 
 if __name__ == "__main__":
 	main()
+

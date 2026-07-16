@@ -1,6 +1,7 @@
 # ~/src/api/ratelimit.py
 
 import time
+from src.services.logging import log_message
 
 PRINT_PREFIX = "RATE LIMIT"
 
@@ -36,7 +37,7 @@ class RateLimit:
             self.requests += 1
             return True, self.limit - self.requests
         else:
-            print(f"[WARNING] [{PRINT_PREFIX}] Rate limit exceeded for key {self.key_hash}. Current requests: {self.requests}, Limit: {self.limit}.")
+            log_message(f"[WARNING] [{PRINT_PREFIX}] Rate limit exceeded for key {self.key_hash}. Current requests: {self.requests}, Limit: {self.limit}.")
             return False, 1 / self.per_sec_refill  # Estimated time until next request is allowed
         
     def how_long_ago(self) -> float:

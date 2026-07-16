@@ -5,6 +5,7 @@ from typing import Optional
 
 from src.api.config import VIEW_LEVEL
 from src.api.models import RequestBase
+from src.services.logging import log_message
 
 PRINT_PREFIX = "API DB MODELS"
 
@@ -32,4 +33,4 @@ class ApiKeyDeleteRequest(RequestBase):
     key_hash: str
 
 
-print(f"[DEBUG] [{PRINT_PREFIX}] API key admin request models loaded.")
+log_message(f"[DEBUG] [{PRINT_PREFIX}] API key admin request models loaded.")

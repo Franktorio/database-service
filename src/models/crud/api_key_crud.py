@@ -3,29 +3,30 @@
 from sqlalchemy import select, delete, update
 from src.models.database import SessionLocal
 from src.models.tables.api_key_table import ApiKey
+from src.services.logging import log_message
 
 PRINT_PREFIX = "API KEY CRUD"
 
 async def add_api_key(key_hash: str, permission_level: int = 0, rate_limit: int = 1000, email: str = "") -> ApiKey:
     """Add a new API key to the database."""
-    print(f"[DEBUG] [{PRINT_PREFIX}] Adding API key with permission level {permission_level} and rate limit {rate_limit} to email {email}.")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Adding API key with permission level {permission_level} and rate limit {rate_limit} to email {email}.")
     async with SessionLocal() as session:
         api_key = ApiKey(key_hash=key_hash, permission_level=permission_level, rate_limit=rate_limit, email=email)
         session.add(api_key)
         await session.commit()
         await session.refresh(api_key)
-        print(f"[INFO] [{PRINT_PREFIX}] API key row created with id {api_key.id}.")
+        log_message(f"[INFO] [{PRINT_PREFIX}] API key row created with id {api_key.id}.")
         return api_key
     
 async def get_api_key(key_hash: str) -> ApiKey | None:
     """Fetch an API key by its hash."""
-    print(f"[DEBUG] [{PRINT_PREFIX}] Fetching API key by hash.")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Fetching API key by hash.")
     async with SessionLocal() as session:
         stmt = select(ApiKey).where(ApiKey.key_hash == key_hash)
         result = await session.execute(stmt)
         api_key = result.scalar_one_or_none()
         if api_key is None:
-            print(f"[WARNING] [{PRINT_PREFIX}] API key not found for provided hash.")
+            log_message(f"[WARNING] [{PRINT_PREFIX}] API key not found for provided hash.")
         return api_key
     
 async def get_api_keys() -> list[ApiKey]:
@@ -34,7 +35,7 @@ async def get_api_keys() -> list[ApiKey]:
         stmt = select(ApiKey).order_by(ApiKey.created_at)
         result = await session.execute(stmt)
         api_keys = result.scalars().all()
-        print(f"[DEBUG] [{PRINT_PREFIX}] Retrieved {len(api_keys)} API key rows.")
+        log_message(f"[DEBUG] [{PRINT_PREFIX}] Retrieved {len(api_keys)} API key rows.")
         return api_keys
     
 async def delete_api_key(key_hash: str) -> bool:
@@ -45,9 +46,9 @@ async def delete_api_key(key_hash: str) -> bool:
         await session.commit()
         deleted = result.rowcount > 0
         if deleted:
-            print(f"[INFO] [{PRINT_PREFIX}] Deleted API key for provided hash.")
+            log_message(f"[INFO] [{PRINT_PREFIX}] Deleted API key for provided hash.")
         else:
-            print(f"[WARNING] [{PRINT_PREFIX}] No API key found to delete for provided hash.")
+            log_message(f"[WARNING] [{PRINT_PREFIX}] No API key found to delete for provided hash.")
         return deleted
     
 async def update_api_key(
@@ -57,7 +58,7 @@ async def update_api_key(
     new_email: str | None = None,
 ) -> ApiKey | None:
     """Update the permission level, rate limit, and/or email of an API key."""
-    print(f"[DEBUG] [{PRINT_PREFIX}] Updating API key attributes.")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating API key attributes.")
     async with SessionLocal() as session:
         stmt = (
             update(ApiKey)
@@ -73,7 +74,7 @@ async def update_api_key(
         await session.commit()
         updated_api_key = result.scalar_one_or_none()
         if updated_api_key is None:
-            print(f"[WARNING] [{PRINT_PREFIX}] API key update skipped; key not found.")
+            log_message(f"[WARNING] [{PRINT_PREFIX}] API key update skipped; key not found.")
         else:
-            print(f"[INFO] [{PRINT_PREFIX}] Updated API key id {updated_api_key.id}.")
+            log_message(f"[INFO] [{PRINT_PREFIX}] Updated API key id {updated_api_key.id}.")
         return updated_api_key

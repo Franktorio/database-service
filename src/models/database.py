@@ -6,6 +6,7 @@ import src.models.tables #ignore
 from config.loader import DATABASE_URL
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from src.services.logging import log_message
 
 PRINT_PREFIX = "DATABASE"
 
@@ -21,8 +22,8 @@ SessionLocal = async_sessionmaker(
 )
 
 async def init_db():
-    print(f"[INFO] [{PRINT_PREFIX}] Initializing database schema.")
-    print(f"[DEBUG] [{PRINT_PREFIX}] SQLAlchemy engine echo is enabled for development visibility.")
+    log_message(f"[INFO] [{PRINT_PREFIX}] Initializing database schema.")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] SQLAlchemy engine echo is enabled for development visibility.")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    print(f"[INFO] [{PRINT_PREFIX}] Database schema initialization complete.")
+    log_message(f"[INFO] [{PRINT_PREFIX}] Database schema initialization complete.")

@@ -1,6 +1,7 @@
 # ~/src/scripts/setup_postgres.py
 
 import pathlib
+import json
 import re
 import shutil
 import subprocess
@@ -16,8 +17,16 @@ from config.loader import (
 	POSTGRESQL_PORT,
 	POSTGRESQL_USERNAME,
 )
+from src.services.logging import log_message
 
 PRINT_PREFIX = "SETUP POSTGRES SCRIPT"
+
+_SERVICE_CONFIG = json.loads(
+	(pathlib.Path(__file__).resolve().parents[1] / "config" / "service_config.json").read_text()
+)
+_SETUP_CONFIG = _SERVICE_CONFIG.get("setup_postgres", {})
+COMMAND_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get("command_subprocess_timeout_seconds", 60)
+PROBE_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get("probe_subprocess_timeout_seconds", 60)
 
 # USAGE (on project root): python3 -m scripts.setup_postgres
 
@@ -26,8 +35,19 @@ ROLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess:
-	print(f"[DEBUG] [{PRINT_PREFIX}] Running command: {' '.join(command)}")
-	return subprocess.run(command, check=True, text=True, capture_output=True)
+	log_message(f"[DEBUG] [{PRINT_PREFIX}] Running command: {' '.join(command)}")
+	try:
+		return subprocess.run(
+			command,
+			check=True,
+			text=True,
+			capture_output=True,
+			timeout=COMMAND_SUBPROCESS_TIMEOUT_SECONDS,
+		)
+	except subprocess.TimeoutExpired as exc:
+		raise RuntimeError(
+			f"Command timed out after {COMMAND_SUBPROCESS_TIMEOUT_SECONDS}s: {' '.join(command)}"
+		) from exc
 
 
 def _require_command(command_name: str) -> None:
@@ -39,19 +59,19 @@ def _require_command(command_name: str) -> None:
 
 
 def _install_postgres_packages() -> None:
-	print(f"[INFO] [{PRINT_PREFIX}] Installing PostgreSQL packages with sudo.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Installing PostgreSQL packages with sudo.")
 	_run(["sudo", "apt-get", "update"])
 	_run(["sudo", "apt-get", "install", "-y", "postgresql", "postgresql-contrib"])
 
 
 def _start_postgres_service() -> None:
-	print(f"[INFO] [{PRINT_PREFIX}] Enabling and starting PostgreSQL service.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Enabling and starting PostgreSQL service.")
 	_run(["sudo", "systemctl", "enable", "postgresql"])
 	_run(["sudo", "systemctl", "start", "postgresql"])
 
 
 def _restart_postgres_service() -> None:
-	print(f"[INFO] [{PRINT_PREFIX}] Restarting PostgreSQL service to apply configuration changes.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Restarting PostgreSQL service to apply configuration changes.")
 	_run(["sudo", "systemctl", "restart", "postgresql"])
 
 
@@ -106,13 +126,19 @@ def _get_postgresql_conf_path() -> str:
 
 def _set_postgresql_port(port: int) -> None:
 	conf_path = _get_postgresql_conf_path()
-	print(f"[INFO] [{PRINT_PREFIX}] Setting PostgreSQL port to {port} in '{conf_path}'.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Setting PostgreSQL port to {port} in '{conf_path}'.")
 
 	port_line_pattern = r"^[[:space:]]*#?[[:space:]]*port[[:space:]]*="
-	has_port_line = subprocess.run(
-		["sudo", "grep", "-Eq", port_line_pattern, conf_path],
-		check=False,
-	).returncode == 0
+	try:
+		has_port_line = subprocess.run(
+			["sudo", "grep", "-Eq", port_line_pattern, conf_path],
+			check=False,
+			timeout=PROBE_SUBPROCESS_TIMEOUT_SECONDS,
+		).returncode == 0
+	except subprocess.TimeoutExpired as exc:
+		raise RuntimeError(
+			f"Command timed out after {PROBE_SUBPROCESS_TIMEOUT_SECONDS}s: sudo grep -Eq ... {conf_path}"
+		) from exc
 
 	if has_port_line:
 		_run(
@@ -161,7 +187,7 @@ def _create_or_update_role(role_name: str, role_password: str) -> None:
 	password_literal = _sql_literal(role_password)
 
 	if _role_exists(role_name):
-		print(f"[INFO] [{PRINT_PREFIX}] Role '{role_name}' already exists. Updating password.")
+		log_message(f"[INFO] [{PRINT_PREFIX}] Role '{role_name}' already exists. Updating password.")
 		_run(
 			[
 				"sudo",
@@ -176,7 +202,7 @@ def _create_or_update_role(role_name: str, role_password: str) -> None:
 		)
 		return
 
-	print(f"[INFO] [{PRINT_PREFIX}] Creating role '{role_name}'.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Creating role '{role_name}'.")
 	_run(
 		[
 			"sudo",
@@ -189,7 +215,7 @@ def _create_or_update_role(role_name: str, role_password: str) -> None:
 			f"CREATE ROLE {role_ident} WITH LOGIN PASSWORD {password_literal}",
 		]
 	)
-	print(f"[INFO] [{PRINT_PREFIX}] Created role '{role_name}'.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Created role '{role_name}'.")
 
 
 def _create_database_if_needed(db_name: str, owner_name: str) -> None:
@@ -197,7 +223,7 @@ def _create_database_if_needed(db_name: str, owner_name: str) -> None:
 	owner_ident = _quoted_ident(owner_name)
 
 	if _database_exists(db_name):
-		print(f"[INFO] [{PRINT_PREFIX}] Database '{db_name}' already exists.")
+		log_message(f"[INFO] [{PRINT_PREFIX}] Database '{db_name}' already exists.")
 		_run(
 			[
 				"sudo",
@@ -222,10 +248,10 @@ def _create_database_if_needed(db_name: str, owner_name: str) -> None:
 				f"GRANT ALL PRIVILEGES ON DATABASE {db_ident} TO {owner_ident}",
 			]
 		)
-		print(f"[INFO] [{PRINT_PREFIX}] Ensured '{owner_name}' owns database '{db_name}'.")
+		log_message(f"[INFO] [{PRINT_PREFIX}] Ensured '{owner_name}' owns database '{db_name}'.")
 		return
 
-	print(f"[INFO] [{PRINT_PREFIX}] Creating database '{db_name}'.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Creating database '{db_name}'.")
 	_run(
 		[
 			"sudo",
@@ -238,11 +264,11 @@ def _create_database_if_needed(db_name: str, owner_name: str) -> None:
 			f"CREATE DATABASE {db_ident} OWNER {owner_ident}",
 		]
 	)
-	print(f"[INFO] [{PRINT_PREFIX}] Created database '{db_name}'.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Created database '{db_name}'.")
 
 
 def main() -> None:
-	print(f"[INFO] [{PRINT_PREFIX}] Starting PostgreSQL installation/setup.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Starting PostgreSQL installation/setup.")
 
 	for command in ("sudo", "apt-get", "systemctl", "psql"):
 		_require_command(command)
@@ -258,8 +284,9 @@ def main() -> None:
 	_create_or_update_role(POSTGRESQL_USERNAME, POSTGRESQL_PASSWORD)
 	_create_database_if_needed(POSTGRESQL_DATABASE_NAME, POSTGRESQL_USERNAME)
 
-	print(f"[INFO] [{PRINT_PREFIX}] Setup completed successfully.")
+	log_message(f"[INFO] [{PRINT_PREFIX}] Setup completed successfully.")
 
 
 if __name__ == "__main__":
 	main()
+

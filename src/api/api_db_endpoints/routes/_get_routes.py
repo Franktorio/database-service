@@ -6,23 +6,24 @@ from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
 from src.api.models import RequestBase
 from src.api.validate import with_validation
 from src.models.crud.api_key_crud import get_api_keys
+from src.services.logging import log_message
 
 PRINT_PREFIX = "GET API DB ROUTES"
 
 
 @router.get("/")
 async def api_db_root():
-    print(f"[DEBUG] [{PRINT_PREFIX}] Received GET /api/db/keys request.")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received GET /api/db/keys request.")
     return {"message": "API key administration endpoint is online."}
 
 
 @router.post("/list")
 @with_validation(permission_level=SUPER_ADMIN_LEVEL)
 async def list_api_keys(request: RequestBase):
-    print(f"[DEBUG] [{PRINT_PREFIX}] Received API key list request.")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received API key list request.")
     api_keys = await get_api_keys()
     if not api_keys:
-        print(f"[INFO] [{PRINT_PREFIX}] No API keys found.")
+        log_message(f"[INFO] [{PRINT_PREFIX}] No API keys found.")
         return {"message": "No API keys found."}
 
     return {

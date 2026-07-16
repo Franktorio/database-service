@@ -2,8 +2,10 @@
 
 import argparse
 import asyncio
+import sys
 
 from src.api.keys import create_api_key
+from src.services.logging import log_message
 
 PRINT_PREFIX = "GENERATE API KEY SCRIPT"
 
@@ -29,8 +31,8 @@ async def _run() -> None:
 
     token = await create_api_key(permission_level=args.level, rate_limit=args.rate_limit)
 
-    print(f"[INFO] [{PRINT_PREFIX}] API key created successfully.")
-    print(token)
+    log_message(f"[INFO] [{PRINT_PREFIX}] API key created successfully.")
+    sys.stdout.write(f"{token}\n")
 
 
 def main() -> None:
@@ -39,3 +41,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

@@ -14,6 +14,7 @@ from config.loader import (
     POSTGRESQL_HOST,
     POSTGRESQL_PORT,
 )
+from src.services.logging import log_message
 
 PRINT_PREFIX = "BACKUP"
 
@@ -28,6 +29,7 @@ BACKUP_ENABLED = LOCALCONFIG.get("enabled", True)
 BACKUP_DIR = pathlib.Path(
     LOCALCONFIG.get("backup_dir", "backups")
 )
+SUBPROCESS_TIMEOUT_SECONDS = LOCALCONFIG.get("subprocess_timeout_seconds", 30)
 
 
 def _get_last_backup():
@@ -40,7 +42,7 @@ def _get_last_backup():
         backups,
         key=lambda p: p.stat().st_mtime
     )
-    print(f"[DEBUG] [{PRINT_PREFIX}] Latest backup detected: {latest_backup.name}")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Latest backup detected: {latest_backup.name}")
     return latest_backup
 
 
@@ -55,7 +57,7 @@ def _create_backup():
     )
 
     backup_file = BACKUP_DIR / f"backup_{timestamp}.sql"
-    print(f"[DEBUG] [{PRINT_PREFIX}] Running pg_dump for backup target {backup_file}")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Running pg_dump for backup target {backup_file}")
 
     command = [
         "pg_dump",
@@ -69,19 +71,26 @@ def _create_backup():
     env = os.environ.copy()
     env["PGPASSWORD"] = POSTGRESQL_PASSWORD
 
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        env=env
-    )
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        log_message(
+            f"[ERROR] [{PRINT_PREFIX}] pg_dump timed out after {SUBPROCESS_TIMEOUT_SECONDS}s."
+        )
+        return False
 
     if result.returncode != 0:
-        print(f"[ERROR] [{PRINT_PREFIX}] Failed: {result.stderr}")
+        log_message(f"[ERROR] [{PRINT_PREFIX}] Failed: {result.stderr}")
         return False
 
 
-    print(f"[INFO] [{PRINT_PREFIX}] Created {backup_file.name}")
+    log_message(f"[INFO] [{PRINT_PREFIX}] Created {backup_file.name}")
     return True
 
 
@@ -96,14 +105,14 @@ def _cleanup():
     for old in backups[RETENTION:]:
         old.unlink()
 
-        print(f"[INFO] [{PRINT_PREFIX}] Removed {old.name}")
-    print(f"[DEBUG] [{PRINT_PREFIX}] Cleanup completed with retention={RETENTION}.")
+        log_message(f"[INFO] [{PRINT_PREFIX}] Removed {old.name}")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Cleanup completed with retention={RETENTION}.")
 
 
 
 def _backup_service():
     while True:
-        print(f"[DEBUG] [{PRINT_PREFIX}] Backup service running; checking for backup necessity.")
+        log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup service running; checking for backup necessity.")
         last_backup = _get_last_backup()
         should_backup = False
 
@@ -122,22 +131,22 @@ def _backup_service():
                 should_backup = True
 
         if should_backup:
-            print(f"[DEBUG] [{PRINT_PREFIX}] Backup window reached; creating a new backup.")
+            log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup window reached; creating a new backup.")
 
             if _create_backup():
                 _cleanup()
         else:
-            print(f"[DEBUG] [{PRINT_PREFIX}] Backup skipped; most recent backup is within interval.")
-        print(f"[DEBUG] [{PRINT_PREFIX}] Backup service sleeping for {INTERVAL} seconds.")
+            log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup skipped; most recent backup is within interval.")
+        log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup service sleeping for {INTERVAL} seconds.")
         time.sleep(INTERVAL)
 
 def start_backup_service():
     if BACKUP_ENABLED:
-        print(f"[INFO] [{PRINT_PREFIX}] Starting backup service...")
+        log_message(f"[INFO] [{PRINT_PREFIX}] Starting backup service...")
         thread = threading.Thread(
             target=_backup_service,
             daemon=True
         )
         thread.start()
     else:
-        print(f"[INFO] [{PRINT_PREFIX}] Backup service is disabled.")
+        log_message(f"[INFO] [{PRINT_PREFIX}] Backup service is disabled.")

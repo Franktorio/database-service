@@ -2,6 +2,9 @@
 # Decorator orchestrator for API key validation and rate limiting.
 
 from functools import wraps
+import time
+import threading
+from fastapi import HTTPException
 
 from src.models.tables.api_key_table import ApiKey
 from src.models.crud.api_key_crud import get_api_key
@@ -9,57 +12,77 @@ from src.api.keys import hash_token
 from src.api.ratelimit import RateLimit
 from src.api.models import RequestBase
 from src.api.config import PERM_LEVEL_MAP
+from src.services.logging import log_message
 
 PRINT_PREFIX = "API VALIDATE"
 
-old_ratelimit_generation: dict[str, RateLimit] = {}  # 
-current_ratelimit_generation: dict[str, RateLimit] = {}
+_ratelimiters: dict[str, RateLimit] = {}
+_last_seen_by_key: dict[str, float] = {}
+_cache_lock = threading.Lock()
 
-_call_counter = 0
-_CLEANUP_THRESHOLD = 1000
+
+def _key_fingerprint(api_key: str) -> str:
+    """Return a short non-reversible key fingerprint for safe logs."""
+    return hash_token(api_key)[:12]
 
 def _place_in_ratelimiters(api_key: ApiKey) -> RateLimit:
     """Place the API key in the rate limiters dictionary and return its RateLimit instance."""
     api_hash = api_key.key_hash
     limit = api_key.rate_limit
     level = api_key.permission_level
-    current_ratelimit_generation[api_hash] = RateLimit(limit=limit, key_hash=api_hash, permission_level=level)
-    print(f"[DEBUG] [{PRINT_PREFIX}] Placed API key {api_hash} in rate limiters with limit {api_key.rate_limit}.")
-    return current_ratelimit_generation[api_hash]
+    current_time = time.time()
+    _ratelimiters[api_hash] = RateLimit(limit=limit, key_hash=api_hash, permission_level=level)
+    _last_seen_by_key[api_hash] = current_time
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Placed API key {api_hash} in rate limiters with limit {api_key.rate_limit}.")
+    return _ratelimiters[api_hash]
 
-def _cleanup_ratelimiters():
-    """Clean inactive RateLimiters older than the cleanup threshold."""
-    global old_ratelimit_generation, current_ratelimit_generation
-    old_ratelimit_generation = current_ratelimit_generation
-    current_ratelimit_generation = {}
+def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
+    """Remove cached ratelimiters that have been inactive longer than the given threshold."""
+    now = time.time()
+    removed = 0
+    with _cache_lock:
+        stale_hashes = [
+            api_hash
+            for api_hash, last_seen in _last_seen_by_key.items()
+            if (now - last_seen) >= max_inactive_seconds
+        ]
+        for api_hash in stale_hashes:
+            _last_seen_by_key.pop(api_hash, None)
+            if _ratelimiters.pop(api_hash, None) is not None:
+                removed += 1
+
+    if removed > 0:
+        log_message(
+            f"[DEBUG] [{PRINT_PREFIX}] Cleaned {removed} inactive ratelimiter(s) "
+            f"older than {max_inactive_seconds}s."
+        )
+    return removed
 
 async def _obtain_ratelimit(api_key: str) -> RateLimit | None:
     """Store the API key in the rate limiters dictionary and return its RateLimit instance."""
-    global _call_counter
-    
     api_hash = hash_token(api_key)
-    
-    _call_counter += 1
-    if _call_counter >= _CLEANUP_THRESHOLD:
-        _cleanup_ratelimiters()
-        _call_counter = 0
-    
-    if api_hash in current_ratelimit_generation:
-        return current_ratelimit_generation[api_hash]
-    
-    if api_hash in old_ratelimit_generation:
-        ratelimit = old_ratelimit_generation.pop(api_hash)
-        current_ratelimit_generation[api_hash] = ratelimit
-        print(f"[DEBUG] [{PRINT_PREFIX}] Moved API key {api_hash} from old to current rate limiters.")
-        return ratelimit
+
+    with _cache_lock:
+        existing = _ratelimiters.get(api_hash)
+        if existing is not None:
+            _last_seen_by_key[api_hash] = time.time()
+            return existing
     
     database_entry = await get_api_key(api_hash)
     
     if database_entry is None:
-        print(f"[WARNING] [{PRINT_PREFIX}] API key {api_key} attempting to use the API without being registered.")
+        log_message(
+            f"[WARNING] [{PRINT_PREFIX}] Unknown API key attempted access. "
+            f"fingerprint={_key_fingerprint(api_key)}"
+        )
         return None
-    
-    return _place_in_ratelimiters(database_entry)
+
+    with _cache_lock:
+        existing = _ratelimiters.get(api_hash)
+        if existing is not None:
+            _last_seen_by_key[api_hash] = time.time()
+            return existing
+        return _place_in_ratelimiters(database_entry)
 
 
 def with_validation(permission_level: int):
@@ -68,23 +91,36 @@ def with_validation(permission_level: int):
         @wraps(func)
         async def wrapper(request: RequestBase, *args, **kwargs):
             api_key = request.api_key
+            fingerprint = _key_fingerprint(api_key)
             ratelimit = await _obtain_ratelimit(api_key)
             
             if ratelimit is None:
-                print(f"[WARNING] [{PRINT_PREFIX}] API key {api_key} is not registered.")
-                return {"error": "API key is not registered."}, 403
+                log_message(
+                    f"[WARNING] [{PRINT_PREFIX}] API key not registered. "
+                    f"fingerprint={fingerprint}"
+                )
+                raise HTTPException(status_code=403, detail="API key is not registered.")
             
             if ratelimit.permission_level < permission_level:
-                print(f"[WARNING] [{PRINT_PREFIX}] API key {api_key} does not have sufficient permissions. Required: {permission_level}, Found: {ratelimit.permission_level}.")
-                return {"error": "Insufficient permissions."}, 403
+                log_message(
+                    f"[WARNING] [{PRINT_PREFIX}] Insufficient permissions for key "
+                    f"fingerprint={fingerprint}. Required={permission_level}, Found={ratelimit.permission_level}."
+                )
+                raise HTTPException(status_code=403, detail="Insufficient permissions.")
             
             allowed, status = ratelimit.is_allowed()
             if not allowed:
-                print(f"[WARNING] [{PRINT_PREFIX}] API key {api_key} has exceeded its rate limit. Time until next request allowed: {status:.2f} seconds.")
-                return {"error": "Rate limit exceeded.", "retry_after": status}, 429
+                log_message(
+                    f"[WARNING] [{PRINT_PREFIX}] Rate limit exceeded for key "
+                    f"fingerprint={fingerprint}. retry_after={status:.2f}s"
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail={"error": "Rate limit exceeded.", "retry_after": status},
+                )
             
             api_data = {
-                'api_key': api_key,
+                'api_key_fingerprint': fingerprint,
                 'permission_level': ratelimit.permission_level,
                 'permission_name': PERM_LEVEL_MAP.get(ratelimit.permission_level, "UNKNOWN"),
                 'rate_limit': ratelimit.limit,

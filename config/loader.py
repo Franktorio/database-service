@@ -2,9 +2,11 @@
 # This file is responsible for loading environment variables from a .env file.
 
 import dotenv
+import logging
 import os
 
 PRINT_PREFIX = "CONFIG LOADER"
+logger = logging.getLogger("database_service")
 
 # Load environment variables from .env file
 _env_file = os.getenv('ENV_FILE', '.env')
@@ -30,5 +32,45 @@ API_ENABLED: bool = os.getenv('API_ENABLED', 'True').lower() in ('true', '1', 't
 API_PORT: int = int(os.getenv('API_PORT', '8000'))
 API_KEY_PEPPER: str = os.getenv('API_KEY_PEPPER', 'dev-only-change-me')
 
-print(f"[INFO] [{PRINT_PREFIX}] Loaded environment variables from {_env_path}.")
-print(f"[DEBUG] [{PRINT_PREFIX}] Operating mode: {OPERATING_MODE}, API enabled: {API_ENABLED}, API port: {API_PORT}")
+
+def _is_unsafe_secret(value: str, known_default: str) -> bool:
+    if not value:
+        return True
+    if value == known_default:
+        return True
+    return False
+
+
+def _enforce_secret_safety() -> None:
+    unsafe_password = _is_unsafe_secret(POSTGRESQL_PASSWORD, 'your_password')
+    unsafe_pepper = _is_unsafe_secret(API_KEY_PEPPER, 'dev-only-change-me')
+
+    if OPERATING_MODE != 'development':
+        if unsafe_password:
+            raise RuntimeError(
+                "POSTGRESQL_PASSWORD is not securely configured. "
+                "Set a strong secret in config/.env for non-development mode."
+            )
+        if unsafe_pepper:
+            raise RuntimeError(
+                "API_KEY_PEPPER is not securely configured. "
+                "Set a strong secret in config/.env for non-development mode."
+            )
+
+    if OPERATING_MODE == 'development':
+        if unsafe_password:
+            logger.warning(
+                f"[WARNING] [{PRINT_PREFIX}] Using default POSTGRESQL_PASSWORD in development. "
+                "Do not use this value in production."
+            )
+        if unsafe_pepper:
+            logger.warning(
+                f"[WARNING] [{PRINT_PREFIX}] Using default API_KEY_PEPPER in development. "
+                "Do not use this value in production."
+            )
+
+
+_enforce_secret_safety()
+
+logger.info(f"[INFO] [{PRINT_PREFIX}] Loaded environment variables from {_env_path}.")
+logger.debug(f"[DEBUG] [{PRINT_PREFIX}] Operating mode: {OPERATING_MODE}, API enabled: {API_ENABLED}, API port: {API_PORT}")
