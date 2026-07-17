@@ -44,6 +44,12 @@ LOGIN_TIME_WINDOW: int = int(os.getenv('LOGIN_TIME_WINDOW', '1800'))
 COOKIE_DEFAULT_RATE_LIMIT: int = int(os.getenv('COOKIE_DEFAULT_RATE_LIMIT', '120'))
 RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv('RATE_LIMIT_WINDOW_SECONDS', '60'))
 
+# IP Blocking configuration
+IP_BLOCKING_ENABLED: bool = os.getenv('IP_BLOCKING_ENABLED', 'true').lower() in ('true', '1', 't')
+IP_BLOCKING_THRESHOLD: int = int(os.getenv('IP_BLOCKING_THRESHOLD', '300'))
+IP_BLOCKING_TIME_WINDOW: int = int(os.getenv('IP_BLOCKING_TIME_WINDOW', '10'))
+IP_BLOCKING_DURATION: int = int(os.getenv('IP_BLOCKING_DURATION', '3600'))
+
 
 def _is_unsafe_secret(value: str, known_default: str) -> bool:
     if not value:

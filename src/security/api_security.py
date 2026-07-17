@@ -20,6 +20,17 @@ _last_seen_by_key: dict[str, float] = {}
 _cache_lock = threading.Lock()
 
 
+def _client_ip(request: RequestBase | None) -> str | None:
+    if request is None:
+        return None
+    client = getattr(request, "client", None)
+    if client is not None:
+        host = getattr(client, "host", None)
+        if host:
+            return host
+    return None
+
+
 def _key_fingerprint(api_key: str) -> str:
     """Return a short non-reversible key fingerprint for safe logs."""
     return hash_token(api_key)[:12]
@@ -57,7 +68,7 @@ def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
         )
     return removed
 
-async def _obtain_ratelimit(api_key: str) -> RateLimit | None:
+async def _obtain_ratelimit(api_key: str, ip_address: str | None = None) -> RateLimit | None:
     """Store the API key in the rate limiters dictionary and return its RateLimit instance."""
     api_hash = hash_token(api_key)
 
@@ -77,6 +88,7 @@ async def _obtain_ratelimit(api_key: str) -> RateLimit | None:
                 "Unknown API key attempted access. "
                 f"fingerprint={_key_fingerprint(api_key)}"
             ),
+            ip_address=ip_address,
         )
         log_message(
             f"[WARNING] [API VALIDATE] Unknown API key attempted access. "
@@ -99,13 +111,15 @@ def api_authentication(permission_level: int):
         async def wrapper(request: RequestBase, *args, **kwargs):
             api_key = request.api_key
             fingerprint = _key_fingerprint(api_key)
-            ratelimit = await _obtain_ratelimit(api_key)
+            client_ip = _client_ip(request)
+            ratelimit = await _obtain_ratelimit(api_key, ip_address=client_ip)
             
             if ratelimit is None:
                 await safe_add_persistent_log(
                     log_type="API AUTH",
                     log_level="WARNING",
                     message=f"API key not registered. fingerprint={fingerprint}",
+                    ip_address=client_ip,
                 )
                 log_message(
                     f"[WARNING] [API VALIDATE] API key not registered. "
@@ -122,6 +136,7 @@ def api_authentication(permission_level: int):
                         f"fingerprint={fingerprint} required={permission_level} "
                         f"found={ratelimit.permission_level}"
                     ),
+                    ip_address=client_ip,
                 )
                 log_message(
                     f"[WARNING] [API VALIDATE] Insufficient permissions for key "
@@ -135,6 +150,7 @@ def api_authentication(permission_level: int):
                     log_type="API RATE LIMIT",
                     log_level="WARNING",
                     message=f"API rate limit exceeded. fingerprint={fingerprint} retry_after={status:.2f}s",
+                    ip_address=client_ip,
                 )
                 log_message(
                     f"[WARNING] [API VALIDATE] Rate limit exceeded for key "
@@ -152,6 +168,7 @@ def api_authentication(permission_level: int):
                     "API key authentication accepted. "
                     f"fingerprint={fingerprint} permission={ratelimit.permission_level}"
                 ),
+                ip_address=client_ip,
             )
             
             api_data = {

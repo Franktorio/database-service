@@ -18,6 +18,15 @@ _last_seen_by_token: dict[str, float] = {}
 _cache_lock = threading.Lock()
 
 
+def _client_ip(request) -> str | None:
+    client = getattr(request, "client", None)
+    if client is not None:
+        host = getattr(client, "host", None)
+        if host:
+            return host
+    return None
+
+
 def _place_in_ratelimiters(token_hash: str, rate_limit: int) -> RateLimit:
     current_time = time.time()
     _ratelimiters[token_hash] = RateLimit(
@@ -67,12 +76,14 @@ def cookie_authentication(permission_level: int = 0):
     def decorator(func):
         @wraps(func)
         async def wrapper(request, *args, **kwargs):
+            client_ip = _client_ip(request)
             cookie_token = getattr(request, "cookie_token", "") or getattr(request, "token", "")
             if not cookie_token:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",
                     log_level="WARNING",
                     message="Cookie authentication failed: missing cookie token",
+                    ip_address=client_ip,
                 )
                 raise HTTPException(status_code=401, detail="Missing cookie token.")
 
@@ -82,6 +93,7 @@ def cookie_authentication(permission_level: int = 0):
                     log_type="USER AUTH",
                     log_level="WARNING",
                     message="Cookie authentication failed: invalid JWT payload",
+                    ip_address=client_ip,
                 )
                 raise HTTPException(status_code=401, detail="Invalid cookie token.")
 
@@ -92,6 +104,7 @@ def cookie_authentication(permission_level: int = 0):
                     log_type="USER AUTH",
                     log_level="WARNING",
                     message=f"Cookie authentication failed: unregistered token hash={token_hash[:12]}",
+                    ip_address=client_ip,
                 )
                 raise HTTPException(status_code=401, detail="Cookie token is not registered.")
             if cookie_row.revoked:
@@ -99,6 +112,7 @@ def cookie_authentication(permission_level: int = 0):
                     log_type="USER AUTH",
                     log_level="WARNING",
                     message=f"Cookie authentication failed: revoked token hash={token_hash[:12]}",
+                    ip_address=client_ip,
                 )
                 raise HTTPException(status_code=401, detail="Cookie token has been revoked.")
             if cookie_row.expires_at <= datetime.now(timezone.utc):
@@ -106,6 +120,7 @@ def cookie_authentication(permission_level: int = 0):
                     log_type="USER AUTH",
                     log_level="WARNING",
                     message=f"Cookie authentication failed: expired token hash={token_hash[:12]}",
+                    ip_address=client_ip,
                 )
                 raise HTTPException(status_code=401, detail="Cookie token has expired.")
 
@@ -121,6 +136,7 @@ def cookie_authentication(permission_level: int = 0):
                         f"username={token_payload.get('username', '')} required={permission_level} "
                         f"found={effective_permission_level}"
                     ),
+                    ip_address=client_ip,
                 )
                 raise HTTPException(status_code=403, detail="Insufficient permissions.")
 
@@ -133,6 +149,7 @@ def cookie_authentication(permission_level: int = 0):
                         "Cookie rate limit exceeded "
                         f"username={token_payload.get('username', '')} retry_after={status:.2f}s"
                     ),
+                    ip_address=client_ip,
                 )
                 raise HTTPException(
                     status_code=429,
@@ -161,6 +178,7 @@ def cookie_authentication(permission_level: int = 0):
                     "Cookie authentication accepted "
                     f"username={request._cookie_data['username']} permission={effective_permission_level}"
                 ),
+                ip_address=client_ip,
             )
             return await func(request, *args, **kwargs)
 

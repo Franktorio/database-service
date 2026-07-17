@@ -28,5 +28,11 @@
         "enabled": true,
         "sweep_interval": 60,
         "max_inactive_seconds": 900
+    },
+    "ip_block_cache":
+    {
+        "enabled": true,
+        "sweep_interval": 60,
+        "max_inactive_seconds": 900
     }
 }

@@ -2,11 +2,13 @@
 
 import uvicorn
 import fastapi
+from fastapi import Request
 from contextlib import asynccontextmanager
 
 from config.loader import API_ENABLED, API_PORT
 from src.api.api_db_endpoints import routes as api_db_routes
 from src.security.api_security import api_authentication
+from src.security.ip_block import with_ip_block
 from src.models.database import init_db
 
 from src.api.config import VIEW_LEVEL
@@ -42,14 +44,16 @@ def start_api_server():
     
 
 @app.get("/")
-async def root():
+@with_ip_block
+async def root(endpoint_request: Request):
     """Root endpoint for the API service; returns a simple greeting message."""
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Root endpoint called.")
     return {"message": "Hello from the Nightfall Development Group Database!"}
 
 @app.post("/auth-test")
+@with_ip_block
 @api_authentication(permission_level=VIEW_LEVEL)
-async def auth_test(request: RequestBase):
+async def auth_test(request: RequestBase, endpoint_request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Auth test endpoint called.")
     return {
         "message": f"API key is valid: {request._api_data}"

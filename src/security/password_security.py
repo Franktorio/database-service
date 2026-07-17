@@ -1,7 +1,6 @@
 # ~/src/security/password_security.py
 # Decorator orchestrator for password validation and rate limiting.
 
-from functools import wraps
 import time
 import threading
 from fastapi import HTTPException
@@ -10,7 +9,6 @@ from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.crud.system.user_crud import get_user_by_username
 from src.security.ratelimit import RateLimit
-from src.services.logging import log_message
 
 from src.security.tokens import verify_password
 
@@ -62,8 +60,8 @@ async def _obtain_ratelimit(username: str) -> RateLimit:
         return _place_in_ratelimiters(username, configured_limit)
 
 
-async def authenticate_password(username: str, password: str) -> bool:
-    """Function that either returns true or raises an HTTPException if the password is invalid or rate limit exceeded."""
+async def authenticate_password(username: str, password: str, ip_address: str) -> bool:
+    """Return True on success, otherwise raise HTTPException with persistent auth logging."""
     rate_limiter = await _obtain_ratelimit(username)
     allowed, status = rate_limiter.is_allowed()
     if not allowed:
@@ -71,6 +69,7 @@ async def authenticate_password(username: str, password: str) -> bool:
             log_type="USER RATE LIMIT",
             log_level="WARNING",
             message=f"Password rate limit exceeded for username={username}. retry_after={status:.2f}s",
+            ip_address=ip_address,
         )
         raise HTTPException(
             status_code=429,
@@ -83,6 +82,7 @@ async def authenticate_password(username: str, password: str) -> bool:
             log_type="USER AUTH",
             log_level="WARNING",
             message=f"Password authentication failed: unknown username={username}",
+            ip_address=ip_address,
         )
         raise HTTPException(status_code=401, detail="Invalid username or password.")
     
@@ -92,6 +92,7 @@ async def authenticate_password(username: str, password: str) -> bool:
             log_type="USER AUTH",
             log_level="WARNING",
             message=f"Password authentication failed: invalid password for username={username}",
+            ip_address=ip_address,
         )
         raise HTTPException(status_code=401, detail="Invalid username or password.")
 
@@ -99,6 +100,7 @@ async def authenticate_password(username: str, password: str) -> bool:
         log_type="USER AUTH",
         log_level="INFO",
         message=f"Password authentication accepted for username={username}",
+        ip_address=ip_address,
     )
     
     return True
