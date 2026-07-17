@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT
 from src.api.config import PERM_LEVEL_MAP
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
+from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.ratelimit import RateLimit
 from src.security.tokens import decode_jwt_token, hash_token
 from src.services.logging import log_message
@@ -68,29 +69,71 @@ def cookie_authentication(permission_level: int = 0):
         async def wrapper(request, *args, **kwargs):
             cookie_token = getattr(request, "cookie_token", "") or getattr(request, "token", "")
             if not cookie_token:
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message="Cookie authentication failed: missing cookie token",
+                )
                 raise HTTPException(status_code=401, detail="Missing cookie token.")
 
             token_payload = decode_jwt_token(cookie_token)
             if token_payload is None:
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message="Cookie authentication failed: invalid JWT payload",
+                )
                 raise HTTPException(status_code=401, detail="Invalid cookie token.")
 
             token_hash = hash_token(cookie_token)
             cookie_row = await get_auth_cookie_by_hash(token_hash)
             if cookie_row is None:
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message=f"Cookie authentication failed: unregistered token hash={token_hash[:12]}",
+                )
                 raise HTTPException(status_code=401, detail="Cookie token is not registered.")
             if cookie_row.revoked:
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message=f"Cookie authentication failed: revoked token hash={token_hash[:12]}",
+                )
                 raise HTTPException(status_code=401, detail="Cookie token has been revoked.")
             if cookie_row.expires_at <= datetime.now(timezone.utc):
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message=f"Cookie authentication failed: expired token hash={token_hash[:12]}",
+                )
                 raise HTTPException(status_code=401, detail="Cookie token has expired.")
 
             ratelimit = await _obtain_ratelimit(token_hash)
             effective_permission_level = int(token_payload.get("permission_level", 0))
 
             if effective_permission_level < permission_level:
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message=(
+                        "Cookie authentication failed: insufficient permissions "
+                        f"username={token_payload.get('username', '')} required={permission_level} "
+                        f"found={effective_permission_level}"
+                    ),
+                )
                 raise HTTPException(status_code=403, detail="Insufficient permissions.")
 
             allowed, status = ratelimit.is_allowed()
             if not allowed:
+                await safe_add_persistent_log(
+                    log_type="USER RATE LIMIT",
+                    log_level="WARNING",
+                    message=(
+                        "Cookie rate limit exceeded "
+                        f"username={token_payload.get('username', '')} retry_after={status:.2f}s"
+                    ),
+                )
                 raise HTTPException(
                     status_code=429,
                     detail={"error": "Rate limit exceeded.", "retry_after": status},
@@ -110,6 +153,14 @@ def cookie_authentication(permission_level: int = 0):
             log_message(
                 f"[DEBUG] [COOKIE SECURITY] Cookie auth accepted for user "
                 f"{request._cookie_data['username']} with level {effective_permission_level}."
+            )
+            await safe_add_persistent_log(
+                log_type="USER AUTH",
+                log_level="INFO",
+                message=(
+                    "Cookie authentication accepted "
+                    f"username={request._cookie_data['username']} permission={effective_permission_level}"
+                ),
             )
             return await func(request, *args, **kwargs)
 

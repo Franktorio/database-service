@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from src.models.tables.system.api_key_table import ApiKey
 from src.models.crud.system.api_key_crud import get_api_key
+from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.tokens import hash_token
 from src.security.ratelimit import RateLimit
 from src.api.models import RequestBase
@@ -69,6 +70,14 @@ async def _obtain_ratelimit(api_key: str) -> RateLimit | None:
     database_entry = await get_api_key(api_hash)
     
     if database_entry is None:
+        await safe_add_persistent_log(
+            log_type="API AUTH",
+            log_level="WARNING",
+            message=(
+                "Unknown API key attempted access. "
+                f"fingerprint={_key_fingerprint(api_key)}"
+            ),
+        )
         log_message(
             f"[WARNING] [API VALIDATE] Unknown API key attempted access. "
             f"fingerprint={_key_fingerprint(api_key)}"
@@ -93,6 +102,11 @@ def api_authentication(permission_level: int):
             ratelimit = await _obtain_ratelimit(api_key)
             
             if ratelimit is None:
+                await safe_add_persistent_log(
+                    log_type="API AUTH",
+                    log_level="WARNING",
+                    message=f"API key not registered. fingerprint={fingerprint}",
+                )
                 log_message(
                     f"[WARNING] [API VALIDATE] API key not registered. "
                     f"fingerprint={fingerprint}"
@@ -100,6 +114,15 @@ def api_authentication(permission_level: int):
                 raise HTTPException(status_code=403, detail="API key is not registered.")
             
             if ratelimit.permission_level < permission_level:
+                await safe_add_persistent_log(
+                    log_type="API AUTH",
+                    log_level="WARNING",
+                    message=(
+                        "Insufficient API permissions. "
+                        f"fingerprint={fingerprint} required={permission_level} "
+                        f"found={ratelimit.permission_level}"
+                    ),
+                )
                 log_message(
                     f"[WARNING] [API VALIDATE] Insufficient permissions for key "
                     f"fingerprint={fingerprint}. Required={permission_level}, Found={ratelimit.permission_level}."
@@ -108,6 +131,11 @@ def api_authentication(permission_level: int):
             
             allowed, status = ratelimit.is_allowed()
             if not allowed:
+                await safe_add_persistent_log(
+                    log_type="API RATE LIMIT",
+                    log_level="WARNING",
+                    message=f"API rate limit exceeded. fingerprint={fingerprint} retry_after={status:.2f}s",
+                )
                 log_message(
                     f"[WARNING] [API VALIDATE] Rate limit exceeded for key "
                     f"fingerprint={fingerprint}. retry_after={status:.2f}s"
@@ -116,6 +144,15 @@ def api_authentication(permission_level: int):
                     status_code=429,
                     detail={"error": "Rate limit exceeded.", "retry_after": status},
                 )
+
+            await safe_add_persistent_log(
+                log_type="API AUTH",
+                log_level="INFO",
+                message=(
+                    "API key authentication accepted. "
+                    f"fingerprint={fingerprint} permission={ratelimit.permission_level}"
+                ),
+            )
             
             api_data = {
                 'api_key_fingerprint': fingerprint,

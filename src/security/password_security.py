@@ -7,6 +7,7 @@ import threading
 from fastapi import HTTPException
 
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
+from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.crud.system.user_crud import get_user_by_username
 from src.security.ratelimit import RateLimit
 from src.services.logging import log_message
@@ -66,6 +67,11 @@ async def authenticate_password(username: str, password: str) -> bool:
     rate_limiter = await _obtain_ratelimit(username)
     allowed, status = rate_limiter.is_allowed()
     if not allowed:
+        await safe_add_persistent_log(
+            log_type="USER RATE LIMIT",
+            log_level="WARNING",
+            message=f"Password rate limit exceeded for username={username}. retry_after={status:.2f}s",
+        )
         raise HTTPException(
             status_code=429,
             detail={"error": "Password rate limit exceeded.", "retry_after": status},
@@ -73,10 +79,26 @@ async def authenticate_password(username: str, password: str) -> bool:
     
     user = await get_user_by_username(username)
     if user is None:
+        await safe_add_persistent_log(
+            log_type="USER AUTH",
+            log_level="WARNING",
+            message=f"Password authentication failed: unknown username={username}",
+        )
         raise HTTPException(status_code=401, detail="Invalid username or password.")
     
     result = verify_password(password, user.password_hash, salt=user.password_salt, iterations=user.hash_iterations)
     if not result:
+        await safe_add_persistent_log(
+            log_type="USER AUTH",
+            log_level="WARNING",
+            message=f"Password authentication failed: invalid password for username={username}",
+        )
         raise HTTPException(status_code=401, detail="Invalid username or password.")
+
+    await safe_add_persistent_log(
+        log_type="USER AUTH",
+        log_level="INFO",
+        message=f"Password authentication accepted for username={username}",
+    )
     
     return True
