@@ -1,6 +1,6 @@
 # ~/src/models/crud/user_crud.py
 
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete
 from src.models.database import SessionLocal
 from src.models.tables.system.user_table import User
 from src.services.logging import log_message
