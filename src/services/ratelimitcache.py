@@ -5,7 +5,7 @@ import pathlib
 import threading
 import time
 
-from src.api.validate import cleanup_inactive_ratelimiters
+from src.security.api_security import cleanup_inactive_ratelimiters
 from src.services.logging import log_message
 
 PRINT_PREFIX = "RATELIMIT CACHE SERVICE"
