@@ -11,6 +11,8 @@ from src.models.crud.user_crud import get_user_by_username
 from src.security.ratelimit import RateLimit
 from src.services.logging import log_message
 
+from src.security.tokens import verify_password
+
 # Dictionary to track per-user password login attempt rate limiters.
 _ratelimiters: dict[str, RateLimit] = {}
 _last_seen_by_user: dict[str, float] = {}
@@ -59,30 +61,22 @@ async def _obtain_ratelimit(username: str) -> RateLimit:
         return _place_in_ratelimiters(username, configured_limit)
 
 
-def password_authentication():
-    """Decorator that rate-limits password-auth attempts by username."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(request, *args, **kwargs):
-            username = getattr(request, "username", "")
-            if not username:
-                raise HTTPException(status_code=400, detail="Missing username for password authentication.")
-
-            ratelimit = await _obtain_ratelimit(username)
-            allowed, status = ratelimit.is_allowed()
-            if not allowed:
-                log_message(
-                    f"[WARNING] [PASSWORD SECURITY] Password rate limit exceeded for user {username}. "
-                    f"retry_after={status:.2f}s"
-                )
-                raise HTTPException(
-                    status_code=429,
-                    detail={"error": "Password rate limit exceeded.", "retry_after": status},
-                )
-
-            return await func(request, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
-        
+async def authenticate_password(username: str, password: str) -> bool:
+    """Function that either returns true or raises an HTTPException if the password is invalid or rate limit exceeded."""
+    rate_limiter = await _obtain_ratelimit(username)
+    allowed, status = rate_limiter.is_allowed()
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "Password rate limit exceeded.", "retry_after": status},
+        )
+    
+    user = await get_user_by_username(username)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    
+    result = verify_password(password, user.password_hash, salt=user.password_salt, iterations=user.hash_iterations)
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    
+    return True
