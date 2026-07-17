@@ -31,6 +31,18 @@ DATABASE_URL = (
 API_ENABLED: bool = os.getenv('API_ENABLED', 'True').lower() in ('true', '1', 't')
 API_PORT: int = int(os.getenv('API_PORT', '8000'))
 API_KEY_PEPPER: str = os.getenv('API_KEY_PEPPER', 'dev-only-change-me')
+PASSWORD_PEPPER: str = os.getenv('PASSWORD_PEPPER', 'dev-only-change-me-password')
+JWT_SECRET: str = os.getenv('JWT_SECRET', 'dev-only-change-me-jwt')
+JWT_ALGORITHM: str = os.getenv('JWT_ALGORITHM', 'HS256')
+JWT_COOKIE_NAME: str = os.getenv('JWT_COOKIE_NAME', 'auth_token')
+JWT_EXP_MINUTES: int = int(os.getenv('JWT_EXP_MINUTES', '60'))
+API_KEY_TOKEN_BYTES: int = int(os.getenv('API_KEY_TOKEN_BYTES', '64'))
+PASSWORD_HASH_ITERATIONS: int = int(os.getenv('PASSWORD_HASH_ITERATIONS', '210000'))
+PASSWORD_HASH_ALGORITHM: str = os.getenv('PASSWORD_HASH_ALGORITHM', 'pbkdf2_sha256')
+LOGIN_ATTEMPTS_LIMIT: int = int(os.getenv('LOGIN_ATTEMPTS_LIMIT', '10'))
+LOGIN_TIME_WINDOW: int = int(os.getenv('LOGIN_TIME_WINDOW', '1800'))
+COOKIE_DEFAULT_RATE_LIMIT: int = int(os.getenv('COOKIE_DEFAULT_RATE_LIMIT', '120'))
+RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv('RATE_LIMIT_WINDOW_SECONDS', '60'))
 
 
 def _is_unsafe_secret(value: str, known_default: str) -> bool:
@@ -44,6 +56,8 @@ def _is_unsafe_secret(value: str, known_default: str) -> bool:
 def _enforce_secret_safety() -> None:
     unsafe_password = _is_unsafe_secret(POSTGRESQL_PASSWORD, 'your_password')
     unsafe_pepper = _is_unsafe_secret(API_KEY_PEPPER, 'dev-only-change-me')
+    unsafe_password_pepper = _is_unsafe_secret(PASSWORD_PEPPER, 'dev-only-change-me-password')
+    unsafe_jwt_secret = _is_unsafe_secret(JWT_SECRET, 'dev-only-change-me-jwt')
 
     if OPERATING_MODE != 'development':
         if unsafe_password:
@@ -56,6 +70,16 @@ def _enforce_secret_safety() -> None:
                 "API_KEY_PEPPER is not securely configured. "
                 "Set a strong secret in config/.env for non-development mode."
             )
+        if unsafe_password_pepper:
+            raise RuntimeError(
+                "PASSWORD_PEPPER is not securely configured. "
+                "Set a strong secret in config/.env for non-development mode."
+            )
+        if unsafe_jwt_secret:
+            raise RuntimeError(
+                "JWT_SECRET is not securely configured. "
+                "Set a strong secret in config/.env for non-development mode."
+            )
 
     if OPERATING_MODE == 'development':
         if unsafe_password:
@@ -66,6 +90,16 @@ def _enforce_secret_safety() -> None:
         if unsafe_pepper:
             logger.warning(
                 f"[WARNING] [{PRINT_PREFIX}] Using default API_KEY_PEPPER in development. "
+                "Do not use this value in production."
+            )
+        if unsafe_password_pepper:
+            logger.warning(
+                f"[WARNING] [{PRINT_PREFIX}] Using default PASSWORD_PEPPER in development. "
+                "Do not use this value in production."
+            )
+        if unsafe_jwt_secret:
+            logger.warning(
+                f"[WARNING] [{PRINT_PREFIX}] Using default JWT_SECRET in development. "
                 "Do not use this value in production."
             )
 

@@ -1,0 +1,28 @@
+from datetime import datetime
+
+from sqlalchemy import DateTime, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from src.models.base import Base
+from src.services.logging import log_message
+
+PRINT_PREFIX = "AUTH COOKIE TABLE"
+
+
+class AuthCookie(Base):
+    __tablename__ = "auth_cookies"
+
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    token_hash: Mapped[str] = mapped_column(nullable=False, unique=True)
+    username: Mapped[str] = mapped_column(nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        init=False,
+    )
+
+
+log_message(f"[DEBUG] [{PRINT_PREFIX}] AuthCookie model registered.")

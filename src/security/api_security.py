@@ -14,8 +14,6 @@ from src.api.models import RequestBase
 from src.api.config import PERM_LEVEL_MAP
 from src.services.logging import log_message
 
-PRINT_PREFIX = "API VALIDATE"
-
 _ratelimiters: dict[str, RateLimit] = {}
 _last_seen_by_key: dict[str, float] = {}
 _cache_lock = threading.Lock()
@@ -33,7 +31,7 @@ def _place_in_ratelimiters(api_key: ApiKey) -> RateLimit:
     current_time = time.time()
     _ratelimiters[api_hash] = RateLimit(limit=limit, key_hash=api_hash, permission_level=level)
     _last_seen_by_key[api_hash] = current_time
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Placed API key {api_hash} in rate limiters with limit {api_key.rate_limit}.")
+    log_message(f"[DEBUG] [API VALIDATE] Placed API key {api_hash} in rate limiters with limit {api_key.rate_limit}.")
     return _ratelimiters[api_hash]
 
 def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
@@ -53,7 +51,7 @@ def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
 
     if removed > 0:
         log_message(
-            f"[DEBUG] [{PRINT_PREFIX}] Cleaned {removed} inactive ratelimiter(s) "
+            f"[DEBUG] [API VALIDATE] Cleaned {removed} inactive ratelimiter(s) "
             f"older than {max_inactive_seconds}s."
         )
     return removed
@@ -72,7 +70,7 @@ async def _obtain_ratelimit(api_key: str) -> RateLimit | None:
     
     if database_entry is None:
         log_message(
-            f"[WARNING] [{PRINT_PREFIX}] Unknown API key attempted access. "
+            f"[WARNING] [API VALIDATE] Unknown API key attempted access. "
             f"fingerprint={_key_fingerprint(api_key)}"
         )
         return None
@@ -96,14 +94,14 @@ def api_authentication(permission_level: int):
             
             if ratelimit is None:
                 log_message(
-                    f"[WARNING] [{PRINT_PREFIX}] API key not registered. "
+                    f"[WARNING] [API VALIDATE] API key not registered. "
                     f"fingerprint={fingerprint}"
                 )
                 raise HTTPException(status_code=403, detail="API key is not registered.")
             
             if ratelimit.permission_level < permission_level:
                 log_message(
-                    f"[WARNING] [{PRINT_PREFIX}] Insufficient permissions for key "
+                    f"[WARNING] [API VALIDATE] Insufficient permissions for key "
                     f"fingerprint={fingerprint}. Required={permission_level}, Found={ratelimit.permission_level}."
                 )
                 raise HTTPException(status_code=403, detail="Insufficient permissions.")
@@ -111,7 +109,7 @@ def api_authentication(permission_level: int):
             allowed, status = ratelimit.is_allowed()
             if not allowed:
                 log_message(
-                    f"[WARNING] [{PRINT_PREFIX}] Rate limit exceeded for key "
+                    f"[WARNING] [API VALIDATE] Rate limit exceeded for key "
                     f"fingerprint={fingerprint}. retry_after={status:.2f}s"
                 )
                 raise HTTPException(

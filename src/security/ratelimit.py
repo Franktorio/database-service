@@ -1,18 +1,15 @@
 # ~/src/security/ratelimit.py
 
 import time
+from config.loader import RATE_LIMIT_WINDOW_SECONDS
 from src.services.logging import log_message
-
-PRINT_PREFIX = "RATE LIMIT"
-
-_MINUTE_SECS = 60
 
 class RateLimit:
     def __init__(self, limit: int, key_hash: str = "", permission_level: int = 0):
         self.limit = limit
         self.requests = 0
         self.last_refresh_time = time.time()
-        self.per_sec_refill = limit / _MINUTE_SECS
+        self.per_sec_refill = limit / RATE_LIMIT_WINDOW_SECONDS
         self.key_hash = key_hash
         self.permission_level = permission_level
     
@@ -37,7 +34,7 @@ class RateLimit:
             self.requests += 1
             return True, self.limit - self.requests
         else:
-            log_message(f"[WARNING] [{PRINT_PREFIX}] Rate limit exceeded for key {self.key_hash}. Current requests: {self.requests}, Limit: {self.limit}.")
+            log_message(f"[WARNING] [RATE LIMIT] Rate limit exceeded for key {self.key_hash}. Current requests: {self.requests}, Limit: {self.limit}.")
             return False, 1 / self.per_sec_refill  # Estimated time until next request is allowed
         
     def how_long_ago(self) -> float:
