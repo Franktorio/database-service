@@ -5,7 +5,7 @@ from src.api.api_db_endpoints.routes.router import router
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
 from src.api.models import RequestBase
 from src.security.api_security import api_authentication
-from src.models.crud.api_key_crud import get_api_keys
+from src.models.crud.system.api_key_crud import get_api_keys
 from src.services.logging import log_message
 
 PRINT_PREFIX = "GET API DB ROUTES"

@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT
 from src.api.config import PERM_LEVEL_MAP
-from src.models.crud.auth_cookie_crud import get_auth_cookie_by_hash
+from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.security.ratelimit import RateLimit
 from src.security.tokens import decode_jwt_token, hash_token
 from src.services.logging import log_message

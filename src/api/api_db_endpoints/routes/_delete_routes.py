@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.api_db_endpoints.models import ApiKeyDeleteRequest
 from src.security.api_security import api_authentication
-from src.models.crud.api_key_crud import delete_api_key
+from src.models.crud.system.api_key_crud import delete_api_key
 from src.services.logging import log_message
 
 PRINT_PREFIX = "DELETE API DB ROUTES"

@@ -19,8 +19,8 @@ from config.loader import (
     PASSWORD_HASH_ITERATIONS,
     PASSWORD_PEPPER,
 )
-from src.models.crud.api_key_crud import add_api_key, get_api_key
-from src.models.crud.auth_cookie_crud import add_auth_cookie
+from src.models.crud.system.api_key_crud import add_api_key, get_api_key
+from src.models.crud.system.auth_cookie_crud import add_auth_cookie
 from src.services.logging import log_message
 
 

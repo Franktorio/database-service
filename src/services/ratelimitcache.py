@@ -6,7 +6,7 @@ import pathlib
 import threading
 import time
 
-from src.models.crud.auth_cookie_crud import delete_expired_auth_cookies
+from src.models.crud.system.auth_cookie_crud import delete_expired_auth_cookies
 from src.security.api_security import cleanup_inactive_ratelimiters
 from src.security.cookie_security import cleanup_inactive_cookie_ratelimiters
 from src.security.password_security import cleanup_inactive_password_ratelimiters

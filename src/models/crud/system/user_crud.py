@@ -2,7 +2,7 @@
 
 from sqlalchemy import select, delete, update
 from src.models.database import SessionLocal
-from src.models.tables.user_table import User
+from src.models.tables.system.user_table import User
 from src.services.logging import log_message
 
 PRINT_PREFIX = "USER CRUD"

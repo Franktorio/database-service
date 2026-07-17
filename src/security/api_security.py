@@ -6,8 +6,8 @@ import time
 import threading
 from fastapi import HTTPException
 
-from src.models.tables.api_key_table import ApiKey
-from src.models.crud.api_key_crud import get_api_key
+from src.models.tables.system.api_key_table import ApiKey
+from src.models.crud.system.api_key_crud import get_api_key
 from src.security.tokens import hash_token
 from src.security.ratelimit import RateLimit
 from src.api.models import RequestBase

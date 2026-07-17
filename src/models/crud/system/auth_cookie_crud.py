@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 
 from src.models.database import SessionLocal
-from src.models.tables.auth_cookie_table import AuthCookie
+from src.models.tables.system.auth_cookie_table import AuthCookie
 from src.services.logging import log_message
 
 PRINT_PREFIX = "AUTH COOKIE CRUD"

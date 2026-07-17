@@ -7,7 +7,7 @@ import threading
 from fastapi import HTTPException
 
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
-from src.models.crud.user_crud import get_user_by_username
+from src.models.crud.system.user_crud import get_user_by_username
 from src.security.ratelimit import RateLimit
 from src.services.logging import log_message
 

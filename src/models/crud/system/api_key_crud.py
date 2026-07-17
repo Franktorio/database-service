@@ -2,7 +2,7 @@
 
 from sqlalchemy import select, delete, update
 from src.models.database import SessionLocal
-from src.models.tables.api_key_table import ApiKey
+from src.models.tables.system.api_key_table import ApiKey
 from src.services.logging import log_message
 
 PRINT_PREFIX = "API KEY CRUD"

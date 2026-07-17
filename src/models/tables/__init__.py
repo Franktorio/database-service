@@ -1,6 +1,6 @@
-from . import api_key_table
-from . import user_table
-from . import auth_cookie_table
+from .system import api_key_table
+from .system import user_table
+from .system import auth_cookie_table
 from src.services.logging import log_message
 
 PRINT_PREFIX = "TABLES INIT"
