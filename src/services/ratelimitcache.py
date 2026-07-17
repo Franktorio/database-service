@@ -30,7 +30,7 @@ def _ratelimit_cache_loop() -> None:
     )
     while True:
         removed_api = cleanup_inactive_ratelimiters(RATELIMIT_CACHE_MAX_INACTIVE_SECONDS)
-        removed_password = cleanup_inactive_password_ratelimiters(RATELIMIT_CACHE_MAX_INACTIVE_SECONDS)
+        removed_password = cleanup_inactive_password_ratelimiters() # This cleanup uses another default time
         removed_cookie = cleanup_inactive_cookie_ratelimiters(RATELIMIT_CACHE_MAX_INACTIVE_SECONDS)
         removed_expired_cookie_rows = asyncio.run(delete_expired_auth_cookies())
 
