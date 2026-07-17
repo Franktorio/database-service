@@ -1,4 +1,4 @@
-# ~/src/api/validate.py
+# ~/src/security/api_security.py
 # Decorator orchestrator for API key validation and rate limiting.
 
 from functools import wraps
@@ -8,8 +8,8 @@ from fastapi import HTTPException
 
 from src.models.tables.api_key_table import ApiKey
 from src.models.crud.api_key_crud import get_api_key
-from src.api.keys import hash_token
-from src.api.ratelimit import RateLimit
+from src.security.tokens import hash_token
+from src.security.ratelimit import RateLimit
 from src.api.models import RequestBase
 from src.api.config import PERM_LEVEL_MAP
 from src.services.logging import log_message
@@ -85,7 +85,7 @@ async def _obtain_ratelimit(api_key: str) -> RateLimit | None:
         return _place_in_ratelimiters(database_entry)
 
 
-def with_validation(permission_level: int):
+def api_authentication(permission_level: int):
     """Decorator to validate API key and enforce rate limiting."""
     def decorator(func):
         @wraps(func)

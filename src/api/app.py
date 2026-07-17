@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from config.loader import API_ENABLED, API_PORT
 from src.api.api_db_endpoints import routes as api_db_routes
-from src.api.validate import with_validation
+from src.security.api_security import api_authentication
 from src.models.database import init_db
 
 from src.api.config import VIEW_LEVEL
@@ -48,7 +48,7 @@ async def root():
     return {"message": "Hello from the Nightfall Development Group Database!"}
 
 @app.post("/auth-test")
-@with_validation(permission_level=VIEW_LEVEL)
+@api_authentication(permission_level=VIEW_LEVEL)
 async def auth_test(request: RequestBase):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Auth test endpoint called.")
     return {

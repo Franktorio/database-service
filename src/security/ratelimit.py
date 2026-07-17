@@ -1,4 +1,4 @@
-# ~/src/api/ratelimit.py
+# ~/src/security/ratelimit.py
 
 import time
 from src.services.logging import log_message

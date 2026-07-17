@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.api_db_endpoints.models import ApiKeyDeleteRequest
-from src.api.validate import with_validation
+from src.security.api_security import api_authentication
 from src.models.crud.api_key_crud import delete_api_key
 from src.services.logging import log_message
 
@@ -13,7 +13,7 @@ PRINT_PREFIX = "DELETE API DB ROUTES"
 
 
 @router.delete("/delete")
-@with_validation(permission_level=SUPER_ADMIN_LEVEL)
+@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def delete_key(request: ApiKeyDeleteRequest):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received API key delete request for hash {request.key_hash}.")
 

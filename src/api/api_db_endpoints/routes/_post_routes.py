@@ -4,8 +4,8 @@ from src.api.api_db_endpoints.routes.router import router
 from fastapi import HTTPException
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
-from src.api.keys import create_api_key, hash_token
-from src.api.validate import with_validation
+from src.security.tokens import create_api_key, hash_token
+from src.security.api_security import api_authentication
 from src.api.api_db_endpoints.models import ApiKeyCreateRequest, ApiKeyUpdateRequest
 from src.models.crud.api_key_crud import update_api_key
 from src.services.logging import log_message
@@ -14,7 +14,7 @@ PRINT_PREFIX = "POST API DB ROUTES"
 
 
 @router.post("/create")
-@with_validation(permission_level=SUPER_ADMIN_LEVEL)
+@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def create_key(request: ApiKeyCreateRequest):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received API key create request.")
 
@@ -46,7 +46,7 @@ async def create_key(request: ApiKeyCreateRequest):
 
 
 @router.post("/update")
-@with_validation(permission_level=SUPER_ADMIN_LEVEL)
+@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def update_key(request: ApiKeyUpdateRequest):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received API key update request for hash {request.key_hash}.")
 

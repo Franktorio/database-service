@@ -4,7 +4,7 @@ from src.api.api_db_endpoints.routes.router import router
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
 from src.api.models import RequestBase
-from src.api.validate import with_validation
+from src.security.api_security import api_authentication
 from src.models.crud.api_key_crud import get_api_keys
 from src.services.logging import log_message
 
@@ -18,7 +18,7 @@ async def api_db_root():
 
 
 @router.post("/list")
-@with_validation(permission_level=SUPER_ADMIN_LEVEL)
+@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def list_api_keys(request: RequestBase):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received API key list request.")
     api_keys = await get_api_keys()

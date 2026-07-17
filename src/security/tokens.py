@@ -1,4 +1,4 @@
-# ~/src/api/keys.py
+# ~/src/security/tokens.py
 # Generates, stores and manages API keys for the application.
 
 import secrets
