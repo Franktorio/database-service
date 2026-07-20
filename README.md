@@ -1,16 +1,31 @@
 # Database Service
 
-Async FastAPI + PostgreSQL service for API-key-secured data operations. The current implementation ships with API-key administration endpoints, permission levels, per-key rate limiting, backups, DB health checks, time-based ratelimit cache cleanup, and operations scripts.
+Async FastAPI + PostgreSQL service for small-scale administrative database operations. The current codebase provides:
 
-## What This Service Does
+- API-key-protected system administration endpoints.
+- User account CRUD with password hashing and cookie-based login.
+- In-memory rate limiting for API keys, login attempts, cookie sessions, and IP blocking.
+- Background backup, cookie-expiry cleanup, DB healthcheck, and cache cleanup services.
+- PostgreSQL bootstrap and schema-migration helper scripts.
 
-- Exposes API-key administration endpoints under /api/db/keys.
-- Stores API keys (hashed with pepper) and supports CRUD management for them.
-- Validates API keys and enforces permission levels.
-- Enforces per-key in-memory rate limiting.
-- Evicts inactive ratelimit cache entries on a time basis via background service.
-- Runs backup and DB healthcheck background services.
-- Uses Python logging with daily log rotation.
+## What It Actually Contains
+
+System tables currently managed by the service:
+
+- `users`
+- `api_keys`
+- `auth_cookies`
+- `persistent_logs`
+
+Important index coverage:
+
+- `users.username` via unique constraint.
+- `api_keys.key_hash` via unique constraint.
+- `api_keys.created_at` explicit index.
+- `auth_cookies.token_hash` via unique constraint.
+- `auth_cookies.username` explicit index.
+- `auth_cookies(expires_at, revoked)` explicit composite index.
+- `persistent_logs.created_at` explicit index.
 
 ## Technology Stack
 
@@ -19,115 +34,152 @@ Async FastAPI + PostgreSQL service for API-key-secured data operations. The curr
 - SQLAlchemy async + asyncpg
 - PostgreSQL
 
-## Architecture Overview
+## Runtime Architecture
 
-Startup flow:
+Startup flow today:
 
-1. Logging initializes.
-2. Main starts service entrypoints through the service layer.
-3. Backup, DB healthcheck, and ratelimit cache services are started.
-4. FastAPI starts and initializes schema with SQLAlchemy metadata.
+1. Logging is initialized in `main.py`.
+2. Background daemon threads are started for backup, DB healthcheck, cookie expiry, IP-block cache cleanup, and API-key ratelimit cache cleanup.
+3. Uvicorn starts the FastAPI app.
+4. During API lifespan startup, SQLAlchemy creates tables and now also creates any declared missing indexes with `checkfirst=True`.
 
-Main components:
+Primary code areas:
 
-- main.py: process bootstrap
-- config/loader.py: env loading and secret safety checks
-- config/service_config.json: runtime service controls and timeout settings
-- src/api: API app, auth validation, ratelimit logic, admin routes
-- src/models: ORM base, DB engine/session, table models, CRUD
-- src/services: logging, backup, healthcheck, ratelimit cache, service layer abstraction
-- scripts: setup_postgres, generate_api_key, migrate_db
+- `main.py`: process entrypoint.
+- `config/loader.py`: environment loading and secret safety checks.
+- `config/service_config.json`: service intervals, retention, and timeouts.
+- `src/api`: app registration, request models, and admin route surfaces.
+- `src/models`: SQLAlchemy base, DB engine, table models, CRUD helpers.
+- `src/security`: API key auth, cookie auth, password auth, token utilities, IP blocking, rate limiting.
+- `src/services`: backup, DB healthcheck, cookie-expiry sweep, logging, cache cleanup.
+- `scripts`: PostgreSQL setup, API key bootstrap, schema migration.
 
 ## Configuration
 
-### Environment Variables
+Create `config/.env` and set at minimum:
 
-Create config/.env and set:
+- `OPERATING_MODE`
+- `POSTGRESQL_DATABASE_NAME`
+- `POSTGRESQL_USERNAME`
+- `POSTGRESQL_PASSWORD`
+- `POSTGRESQL_HOST`
+- `POSTGRESQL_PORT`
+- `API_ENABLED`
+- `API_PORT`
+- `API_KEY_PEPPER`
+- `PASSWORD_PEPPER`
+- `JWT_SECRET`
+- `JWT_ALGORITHM`
+- `JWT_COOKIE_NAME`
+- `JWT_EXP_MINUTES`
 
-- OPERATING_MODE
-- POSTGRESQL_DATABASE_NAME
-- POSTGRESQL_USERNAME
-- POSTGRESQL_PASSWORD
-- POSTGRESQL_HOST
-- POSTGRESQL_PORT
-- API_ENABLED
-- API_PORT
-- API_KEY_PEPPER
+Also supported:
 
-Important:
+- `API_KEY_TOKEN_BYTES`
+- `PASSWORD_HASH_ITERATIONS`
+- `PASSWORD_HASH_ALGORITHM`
+- `LOGIN_ATTEMPTS_LIMIT`
+- `LOGIN_TIME_WINDOW`
+- `COOKIE_DEFAULT_RATE_LIMIT`
+- `RATE_LIMIT_WINDOW_SECONDS`
+- `IP_BLOCKING_ENABLED`
+- `IP_BLOCKING_THRESHOLD`
+- `IP_BLOCKING_TIME_WINDOW`
+- `IP_BLOCKING_DURATION`
 
-- In non-development mode, default/unsafe POSTGRESQL_PASSWORD and API_KEY_PEPPER values will raise at startup.
+Secret-safety behavior:
 
-### Service Runtime Config
+- In non-development mode, unsafe defaults for PostgreSQL password, API-key pepper, password pepper, and JWT secret raise at startup.
+- In development mode, those unsafe defaults only log warnings.
 
-Edit config/service_config.json:
+## Service Runtime Config
 
-- backup
-	- enabled
-	- interval
-	- retention
-	- backup_dir
-	- subprocess_timeout_seconds
-- dbhealthchecker
-	- enabled
-	- auto_rollover
-	- shutdown_on_failure
-	- leniency
-	- interval
-	- backup_dir
-	- healthcheck_subprocess_timeout_seconds
-	- restore_subprocess_timeout_seconds
-- setup_postgres
-	- command_subprocess_timeout_seconds
-	- probe_subprocess_timeout_seconds
-- ratelimit_cache
-	- enabled
-	- sweep_interval
-	- max_inactive_seconds
+`config/service_config.json` currently controls:
 
-## Local Development Run
+- `backup`
+  - `enabled`
+  - `interval`
+  - `retention`
+  - `backup_dir`
+  - `subprocess_timeout_seconds`
+- `dbhealthchecker`
+  - `enabled`
+  - `auto_rollover`
+  - `shutdown_on_failure`
+  - `leniency`
+  - `interval`
+  - `backup_dir`
+  - `healthcheck_subprocess_timeout_seconds`
+  - `restore_subprocess_timeout_seconds`
+- `setup_postgres`
+  - `command_subprocess_timeout_seconds`
+  - `probe_subprocess_timeout_seconds`
+- `ratelimit_cache`
+  - `enabled`
+  - `sweep_interval`
+  - `max_inactive_seconds`
+- `cookie_expiry`
+  - `enabled`
+  - `sweep_interval`
 
-1. Install dependencies:
+## Running Locally
+
+Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
-2. Start service:
+Start the service:
 
 ```bash
-python main.py
+python3 main.py
 ```
 
-The process starts managed services first, then the API server.
+## Current API Surface
 
-## API Surface
+Public/test endpoints:
 
-- GET /
-- POST /auth-test
-- GET /api/db/keys
-- POST /api/db/keys/list
-- POST /api/db/keys/create
-- POST /api/db/keys/update
-- DELETE /api/db/keys/delete
+- `GET /`
+- `POST /api-auth-test`
+- `POST /login-auth-test`
+- `POST /cookie-auth-test`
+- `GET /api/db/keys/`
 
-API-protected endpoints require api_key in request body.
+SUPER_ADMIN API-key-protected endpoints:
+
+- `GET /api/db/keys/list`
+- `POST /api/db/keys/create`
+- `POST /api/db/keys/update`
+- `DELETE /api/db/keys/delete`
+- `GET /api/db/users/list`
+- `GET /api/db/users/{username}`
+- `POST /api/db/users/create`
+- `PATCH /api/db/users/update`
+- `PATCH /api/db/users/password`
+- `PATCH /api/db/users/login-rate-limit`
+- `DELETE /api/db/users/delete`
+
+Important request-format note:
+
+- `GET` admin endpoints resolve `api_key` from query parameters via FastAPI `Depends()`.
+- Non-`GET` admin endpoints use JSON bodies containing `api_key`.
 
 ## Utility Scripts
 
-PostgreSQL setup (Debian/Ubuntu oriented):
+PostgreSQL setup:
 
 ```bash
 python3 -m scripts.setup_postgres
 ```
 
-Generate API key:
+Generate a bootstrap API key:
 
 ```bash
 python3 -m scripts.generate_api_key <permission_level> <rate_limit>
 ```
 
-Database migration (schema-first compatibility copy/swap):
+Run schema-first migration copy/swap:
 
 ```bash
 python3 -m scripts.migrate_db
@@ -135,201 +187,32 @@ python3 -m scripts.migrate_db
 
 ## Logging
 
-- Uses Python logging module.
-- Active log file: logs/db_service_logs.log
-- Daily rotation at midnight.
-- Keeps 7 rotated files.
-- Log levels are derived from prefix conventions such as [DEBUG], [INFO], [WARNING], [ERROR].
+- Console logging plus daily-rotated file logging.
+- Active file: `logs/db_service_logs.log`.
+- Rotation: midnight.
+- Retention: 7 rotated files.
+- Development mode enables debug-level output.
 
-## Detailed Deployment Guide (Linux VM)
+## Deployment Notes
 
-This section describes a practical deployment flow for Ubuntu 22.04+.
+This repository is currently optimized for a single-node Linux deployment. The included PostgreSQL setup flow assumes Debian/Ubuntu-style package management and `systemd`.
 
-### 1) Provision Host
+Reverse-proxy deployments should be treated carefully because IP blocking currently uses `request.client.host` directly and does not parse trusted forwarding headers.
 
-- Create VM.
-- Open ports: 22 (SSH), 80 (HTTP), 443 (HTTPS).
-- Keep API port (for example 8000) private if using reverse proxy.
+## Known Limitations
 
-### 2) Install System Packages
+These are current design realities, not aspirational behavior:
 
-```bash
-sudo apt-get update
-sudo apt-get install -y python3 python3-venv python3-pip git nginx
-```
-
-### 3) Create App User and Directory
-
-```bash
-sudo useradd -m -s /bin/bash dbservice
-sudo mkdir -p /opt/database-service
-sudo chown -R dbservice:dbservice /opt/database-service
-```
-
-### 4) Deploy Code
-
-```bash
-sudo -u dbservice git clone <your-repo-url> /opt/database-service
-cd /opt/database-service
-```
-
-### 5) Create Virtual Environment and Install Dependencies
-
-```bash
-sudo -u dbservice python3 -m venv /opt/database-service/.venv
-sudo -u dbservice /opt/database-service/.venv/bin/pip install --upgrade pip
-sudo -u dbservice /opt/database-service/.venv/bin/pip install -r /opt/database-service/requirements.txt
-```
-
-### 6) Configure App Environment
-
-Create /opt/database-service/config/.env with production-safe values:
-
-```env
-OPERATING_MODE=production
-POSTGRESQL_DATABASE_NAME=your_db
-POSTGRESQL_USERNAME=your_user
-POSTGRESQL_PASSWORD=your_strong_password
-POSTGRESQL_HOST=127.0.0.1
-POSTGRESQL_PORT=5432
-API_ENABLED=True
-API_PORT=8000
-API_KEY_PEPPER=your_long_random_pepper
-```
-
-Review /opt/database-service/config/service_config.json for intervals/timeouts before first start.
-
-### 7) Set Up PostgreSQL
-
-If you are using the included setup script on Ubuntu:
-
-```bash
-cd /opt/database-service
-sudo -u dbservice /opt/database-service/.venv/bin/python -m scripts.setup_postgres
-```
-
-If your Postgres is managed externally, skip this and point .env values to that DB.
-
-### 8) Bootstrap SUPER_ADMIN API Key
-
-```bash
-cd /opt/database-service
-sudo -u dbservice /opt/database-service/.venv/bin/python -m scripts.generate_api_key 4 1000
-```
-
-Store the emitted token securely; it is shown only once.
-
-### 9) Create Systemd Service
-
-Create /etc/systemd/system/database-service.service:
-
-```ini
-[Unit]
-Description=Database Service API
-After=network.target
-
-[Service]
-Type=simple
-User=dbservice
-Group=dbservice
-WorkingDirectory=/opt/database-service
-ExecStart=/opt/database-service/.venv/bin/python /opt/database-service/main.py
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable database-service
-sudo systemctl start database-service
-sudo systemctl status database-service
-```
-
-### 10) Configure Nginx Reverse Proxy
-
-Create /etc/nginx/sites-available/database-service:
-
-```nginx
-server {
-		listen 80;
-		server_name your-domain.com;
-
-		location / {
-				proxy_pass http://127.0.0.1:8000;
-				proxy_http_version 1.1;
-				proxy_set_header Host $host;
-				proxy_set_header X-Real-IP $remote_addr;
-				proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-				proxy_set_header X-Forwarded-Proto $scheme;
-		}
-}
-```
-
-Enable site:
-
-```bash
-sudo ln -s /etc/nginx/sites-available/database-service /etc/nginx/sites-enabled/database-service
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-### 11) Enable TLS (Recommended)
-
-Using Certbot:
-
-```bash
-sudo apt-get install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com
-```
-
-### 12) Verify Deployment
-
-```bash
-curl http://127.0.0.1:8000/
-curl https://your-domain.com/
-sudo systemctl status database-service
-sudo journalctl -u database-service -f
-```
-
-### 13) Operational Checks
-
-- Confirm logs are rotating in logs/.
-- Confirm backups are generated in configured backup_dir.
-- Confirm DB healthcheck behavior matches your leniency and shutdown settings.
-- Confirm ratelimit cache cleanup is running at intended sweep interval.
-
-## Upgrade Procedure
-
-1. Pull new code.
-2. Install any new dependencies.
-3. Review config changes in .env and service_config.json.
-4. Restart service:
-
-```bash
-sudo systemctl restart database-service
-```
-
-If schema changes are included, run migration process before restart strategy finalization.
-
-## Troubleshooting
-
-- Service fails immediately:
-	- Check .env secrets and OPERATING_MODE in config/loader.py rules.
-- API unreachable:
-	- Check systemd status and nginx config.
-- Backup or healthcheck errors:
-	- Verify pg_dump, pg_isready, psql availability and timeout settings.
-- Permission denied on logs/backups:
-	- Verify filesystem ownership for service user.
+- Ratelimits and IP blocks are process-local, not shared across instances.
+- Background services are daemon threads rather than supervised workers.
+- SQL echo is enabled in the DB engine by default.
+- The DB engine uses `NullPool`, which limits connection reuse.
+- Cookie login and cookie refresh paths currently use inconsistent cookie settings.
+- The healthcheck/restore path should be reviewed before production use.
 
 ## Documentation
 
-- API reference: docs/API.md
-- Database reference: docs/DB.md
-- Expansion format: docs/API_DB_FORMAT.md
+- API reference: `docs/API.md`
+- Database reference: `docs/DB.md`
+- Expansion pattern: `docs/API_DB_FORMAT.md`
+- Full codebase review: `docs/CODEBASE_REPORT.md`

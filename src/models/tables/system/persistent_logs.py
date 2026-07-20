@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from sqlalchemy import func, DateTime
+from sqlalchemy import func, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.base import Base
@@ -16,6 +16,9 @@ LOG_TYPES = Literal["REQUEST", "API AUTH", "USER AUTH", "API RATE LIMIT", "USER 
 
 class PersistentLog(Base):
     __tablename__ = "persistent_logs"
+    __table_args__ = (
+        Index("ix_persistent_logs_created_at", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, init=False)
     log_type: Mapped[LOG_TYPES] = mapped_column(nullable=False)

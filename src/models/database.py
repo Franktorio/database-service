@@ -28,4 +28,7 @@ async def init_db():
     log_message(f"[DEBUG] [{PRINT_PREFIX}] SQLAlchemy engine echo is enabled for development visibility.")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        for table in Base.metadata.sorted_tables:
+            for index in table.indexes:
+                await conn.run_sync(lambda sync_conn, idx=index: idx.create(bind=sync_conn, checkfirst=True))
     log_message(f"[INFO] [{PRINT_PREFIX}] Database schema initialization complete.")

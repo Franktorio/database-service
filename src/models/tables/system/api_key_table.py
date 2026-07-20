@@ -29,6 +29,7 @@ class ApiKey(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+        index=True,
         init=False,
     )
 

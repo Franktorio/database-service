@@ -1,173 +1,266 @@
 # API Reference
 
-The API service currently exposes two layers:
+This service exposes a small administrative API plus two authentication test flows.
 
-1. Root and auth checks in `src/api/app.py`.
-2. Super-admin DB administration in `src/api/system/`.
+## Global Behavior
 
-## Current Admin Surface
+- Most routes are wrapped with IP blocking.
+- API-key-protected routes use `api_authentication`.
+- Cookie-protected routes use `cookie_authentication`.
+- `GET` admin endpoints expect `api_key` as a query parameter.
+- Non-`GET` admin endpoints expect `api_key` in the JSON body.
 
-- `GET /` returns a service greeting.
-- `POST /api-auth-test` validates the supplied API key and echoes the resolved permissions.
-- `POST /login-auth-test` validates username/password and issues an auth cookie.
-- `POST /cookie-auth-test` validates auth cookie access.
-- `GET /api/db/keys` returns a simple health message for the API-key admin surface.
-- `GET /api/db/keys/list` lists stored API keys.
-- `POST /api/db/keys/create` creates a new API key.
-- `POST /api/db/keys/update` updates an API key by `key_hash`.
-- `DELETE /api/db/keys/delete` deletes an API key by hashing the supplied token in the request body.
-- `POST /api/db/users/create` creates a new user account.
-- `GET /api/db/users/list` lists users.
-- `GET /api/db/users/{username}` fetches one user.
-- `PATCH /api/db/users/update` updates user email/roles.
-- `PATCH /api/db/users/password` updates user password metadata.
-- `PATCH /api/db/users/login-rate-limit` updates per-user login rate limit.
-- `DELETE /api/db/users/delete` deletes one user by username.
+## Public/Test Endpoints
 
-## Authorization
+### `GET /`
 
-All API-key admin endpoints require `SUPER_ADMIN_LEVEL` access. The bootstrap SUPER_ADMIN key is intended to be created from `scripts/generate_api_key.py`.
+Returns a simple greeting payload.
 
-## Python Example Usage
+### `POST /api-auth-test`
 
-The examples below use the `requests` package and send JSON request bodies.
+Validates an API key and returns resolved permission metadata.
 
-```python
-import requests
+Request body:
 
-BASE_URL = "http://127.0.0.1:8000"
-ADMIN_API_KEY = "your-super-admin-api-key"
-
-
-def post_json(path: str, payload: dict):
-	response = requests.post(f"{BASE_URL}{path}", json=payload, timeout=10)
-	print(path, response.status_code)
-	print(response.json())
-	return response
-
-
-def patch_json(path: str, payload: dict):
-	response = requests.patch(f"{BASE_URL}{path}", json=payload, timeout=10)
-	print(path, response.status_code)
-	print(response.json())
-	return response
-
-
-def delete_json(path: str, payload: dict):
-	response = requests.delete(f"{BASE_URL}{path}", json=payload, timeout=10)
-	print(path, response.status_code)
-	print(response.json())
-	return response
-```
-
-### Create User
-
-```python
-payload = {
-	"api_key": ADMIN_API_KEY,
-	"username": "alice",
-	"password": "change-me-please",
-	"role": "admin",
-	"email": "alice@example.com",
-	"login_rate_limit": 12,
+```json
+{
+  "api_key": "your-api-key"
 }
-
-post_json("/api/db/users/create", payload)
 ```
 
-### Update User Roles (Set / Add / Remove)
+### `POST /login-auth-test`
 
-```python
-# Set full role list
-patch_json("/api/db/users/update", {
-	"api_key": ADMIN_API_KEY,
-	"username": "alice",
-	"set_roles": ["admin", "editor"],
-})
+Validates username/password and returns a cookie-authenticated session cookie.
 
-# Add one role
-patch_json("/api/db/users/update", {
-	"api_key": ADMIN_API_KEY,
-	"username": "alice",
-	"add_role": "auditor",
-})
+Request body:
 
-# Remove one role
-patch_json("/api/db/users/update", {
-	"api_key": ADMIN_API_KEY,
-	"username": "alice",
-	"remove_role": "editor",
-})
-
-# Update email and roles together
-patch_json("/api/db/users/update", {
-	"api_key": ADMIN_API_KEY,
-	"username": "alice",
-	"new_email": "alice+ops@example.com",
-	"add_role": "support",
-})
+```json
+{
+  "username": "alice",
+  "password": "change-me"
+}
 ```
 
-### List / Fetch / Delete Users
+### `POST /cookie-auth-test`
 
-```python
-# List users
-response = requests.get(
-	f"{BASE_URL}/api/db/users/list",
-	params={"api_key": ADMIN_API_KEY},
-	timeout=10,
-)
-print(response.status_code)
-print(response.json())
+Requires the configured auth cookie and returns a success payload when the cookie is valid.
 
-# Fetch one user
-response = requests.get(
-	f"{BASE_URL}/api/db/users/alice",
-	params={"api_key": ADMIN_API_KEY},
-	timeout=10,
-)
-print(response.status_code)
-print(response.json())
+## API Key Administration
 
-# Delete user
-delete_json("/api/db/users/delete", {
-	"api_key": ADMIN_API_KEY,
-	"username": "alice",
-})
+Base prefix: `/api/db/keys`
+
+All endpoints in this section require `SUPER_ADMIN_LEVEL`.
+
+### `GET /api/db/keys/`
+
+Simple availability message for the API-key administration surface.
+
+### `GET /api/db/keys/list`
+
+Lists stored API keys.
+
+Query params:
+
+- `api_key`: SUPER_ADMIN bootstrap or existing SUPER_ADMIN key.
+
+Response shape:
+
+```json
+{
+  "api_keys": [
+    {
+      "id": 1,
+      "key_hash": "...",
+      "permission_level": 1,
+      "permission_name": "EDIT",
+      "rate_limit": 300,
+      "email": "service@example.com",
+      "created_at": "...",
+      "last_updated_at": "..."
+    }
+  ]
+}
 ```
 
-### API Key Admin Examples
+### `POST /api/db/keys/create`
 
-```python
-# Create API key
-post_json("/api/db/keys/create", {
-	"api_key": ADMIN_API_KEY,
-	"permission_level": 1,
-	"rate_limit": 300,
-	"email": "service@example.com",
-})
+Creates a non-SUPER_ADMIN API key.
 
-# Update API key by key_hash
-post_json("/api/db/keys/update", {
-	"api_key": ADMIN_API_KEY,
-	"key_hash": "your-target-key-hash",
-	"new_permission_level": 2,
-	"new_rate_limit": 500,
-	"new_email": "service-updated@example.com",
-})
+Request body:
 
-# Delete API key by raw token in request
-delete_json("/api/db/keys/delete", {
-	"api_key": ADMIN_API_KEY,
-	"target_api_key": "raw-token-to-delete",
-})
+```json
+{
+  "api_key": "super-admin-api-key",
+  "permission_level": 1,
+  "rate_limit": 300,
+  "email": "service@example.com"
+}
 ```
 
-## Expansion Pattern
+Response includes the raw token once:
 
-When adding a new API surface:
+```json
+{
+  "message": "API key created successfully.",
+  "api_key": {
+    "token": "raw-token",
+    "key_hash": "hashed-token",
+    "permission_level": 1,
+    "permission_name": "EDIT",
+    "rate_limit": 300,
+    "email": "service@example.com"
+  }
+}
+```
 
-1. Create a new router package under `src/api/system/`.
-2. Define request models close to the routes that use them.
-3. Register the router in `src/api/app.py`.
-4. Keep permission checks centralized through `with_validation`.
+### `POST /api/db/keys/update`
+
+Updates an API key by `key_hash`.
+
+Request body:
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "key_hash": "target-key-hash",
+  "new_permission_level": 2,
+  "new_rate_limit": 500,
+  "new_email": "service-updated@example.com"
+}
+```
+
+### `DELETE /api/db/keys/delete`
+
+Deletes an API key by hashing the supplied raw target token.
+
+Request body:
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "target_api_key": "raw-token-to-delete"
+}
+```
+
+## User Administration
+
+Base prefix: `/api/db/users`
+
+All endpoints in this section require `SUPER_ADMIN_LEVEL`.
+
+### `GET /api/db/users/list`
+
+Lists all users.
+
+Query params:
+
+- `api_key`: SUPER_ADMIN key.
+
+### `GET /api/db/users/{username}`
+
+Fetches a single user by username.
+
+Query params:
+
+- `api_key`: SUPER_ADMIN key.
+
+### `POST /api/db/users/create`
+
+Creates a user and hashes the submitted password.
+
+Request body:
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "username": "alice",
+  "password": "change-me-please",
+  "role": "admin",
+  "email": "alice@example.com",
+  "login_rate_limit": 12
+}
+```
+
+### `PATCH /api/db/users/update`
+
+Updates user email and/or roles.
+
+Request body examples:
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "username": "alice",
+  "set_roles": ["admin", "editor"]
+}
+```
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "username": "alice",
+  "add_role": "auditor"
+}
+```
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "username": "alice",
+  "remove_role": "editor"
+}
+```
+
+### `PATCH /api/db/users/password`
+
+Replaces password hash metadata for a user.
+
+Request body:
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "username": "alice",
+  "new_password": "new-secret"
+}
+```
+
+### `PATCH /api/db/users/login-rate-limit`
+
+Updates the per-user password-login rate limit.
+
+Request body:
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "username": "alice",
+  "new_login_rate_limit": 20
+}
+```
+
+### `DELETE /api/db/users/delete`
+
+Deletes a user by username.
+
+Request body:
+
+```json
+{
+  "api_key": "super-admin-api-key",
+  "username": "alice"
+}
+```
+
+## Security Notes
+
+- API keys are stored as hashes, not raw tokens.
+- Cookie tokens are also stored by hash for revocation checks.
+- `SUPER_ADMIN` keys cannot be created through the HTTP API.
+- GET endpoints use query params for `api_key`, which is convenient but less ideal from a secret-handling perspective than a header.
+
+## Known Gaps
+
+- API-key and cookie ratelimits are process-local.
+- The cookie login endpoint and cookie refresh path currently use different cookie settings.
+- Persistent logging occurs on auth success and failure paths, which adds DB dependency to control-plane traffic.
