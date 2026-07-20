@@ -4,13 +4,13 @@
 from typing import Optional
 
 from src.api.config import VIEW_LEVEL
-from src.api.models import RequestBase
+from src.api.models import APIRequestBase
 from src.services.logging import log_message
 
 PRINT_PREFIX = "API DB MODELS"
 
 
-class ApiKeyCreateRequest(RequestBase):
+class ApiKeyCreateRequest(APIRequestBase):
     """Request body for creating a new API key."""
 
     permission_level: int = VIEW_LEVEL
@@ -18,7 +18,7 @@ class ApiKeyCreateRequest(RequestBase):
     email: str = ""
 
 
-class ApiKeyUpdateRequest(RequestBase):
+class ApiKeyUpdateRequest(APIRequestBase):
     """Request body for updating an existing API key."""
 
     key_hash: str
@@ -27,10 +27,10 @@ class ApiKeyUpdateRequest(RequestBase):
     new_email: Optional[str] = None
 
 
-class ApiKeyDeleteRequest(RequestBase):
-    """Request body for deleting an API key."""
+class ApiKeyDeleteRequest(APIRequestBase):
+    """Request body for deleting an API key token."""
 
-    key_hash: str
+    target_api_key: str
 
 
 log_message(f"[DEBUG] [{PRINT_PREFIX}] API key admin request models loaded.")

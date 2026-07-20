@@ -19,3 +19,5 @@ PERM_LEVEL_MAP = {
 }
 
 log_message(f"[DEBUG] [{PRINT_PREFIX}] Permission levels loaded: {PERM_LEVEL_MAP}")
+
+COOKIE_JWT_INDEX = "auth_token"

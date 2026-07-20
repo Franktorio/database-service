@@ -1,13 +1,13 @@
 # ~/src/api/api_db_endpoints/routes/_post_routes.py
 
-from src.api.api_db_endpoints.routes.router import router
+from src.api.system.api_db_endpoints.routes.router import router
 from fastapi import HTTPException, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
 from src.security.tokens import create_api_key, hash_token
 from src.security.api_security import api_authentication
 from src.security.ip_block import with_ip_block
-from src.api.api_db_endpoints.models import ApiKeyCreateRequest, ApiKeyUpdateRequest
+from src.api.system.api_db_endpoints.models import ApiKeyCreateRequest, ApiKeyUpdateRequest
 from src.models.crud.system.api_key_crud import update_api_key
 from src.services.logging import log_message
 
@@ -17,7 +17,7 @@ PRINT_PREFIX = "POST API DB ROUTES"
 @router.post("/create")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def create_key(request: ApiKeyCreateRequest, endpoint_request: Request):
+async def create_key(request: ApiKeyCreateRequest):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received API key create request.")
 
     if request.permission_level >= SUPER_ADMIN_LEVEL:
@@ -50,7 +50,7 @@ async def create_key(request: ApiKeyCreateRequest, endpoint_request: Request):
 @router.post("/update")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def update_key(request: ApiKeyUpdateRequest, endpoint_request: Request):
+async def update_key(request: ApiKeyUpdateRequest):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received API key update request for hash {request.key_hash}.")
 
     if request.new_permission_level is not None and request.new_permission_level >= SUPER_ADMIN_LEVEL:

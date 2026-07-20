@@ -6,6 +6,7 @@ import src.models.tables #ignore
 from config.loader import DATABASE_URL
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import NullPool
 from src.services.logging import log_message
 
 PRINT_PREFIX = "DATABASE"
@@ -13,6 +14,7 @@ PRINT_PREFIX = "DATABASE"
 engine = create_async_engine(
     DATABASE_URL,
     echo=True,
+    poolclass=NullPool,
 )
 
 SessionLocal = async_sessionmaker(

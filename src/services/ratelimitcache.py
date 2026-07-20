@@ -7,6 +7,7 @@ import threading
 import time
 
 from src.models.crud.system.auth_cookie_crud import delete_expired_auth_cookies
+from src.models.database import SessionLocal
 from src.security.api_security import cleanup_inactive_ratelimiters
 from src.security.cookie_security import cleanup_inactive_cookie_ratelimiters
 from src.security.password_security import cleanup_inactive_password_ratelimiters
@@ -23,6 +24,11 @@ RATELIMIT_CACHE_SWEEP_INTERVAL = LOCALCONFIG.get("sweep_interval", 60)
 RATELIMIT_CACHE_MAX_INACTIVE_SECONDS = LOCALCONFIG.get("max_inactive_seconds", 900)
 
 
+async def _delete_expired_auth_cookies_with_service_session() -> int:
+    async with SessionLocal() as session:
+        return await delete_expired_auth_cookies(session=session)
+
+
 def _ratelimit_cache_loop() -> None:
     log_message(
         f"[INFO] [{PRINT_PREFIX}] Ratelimit cache cleanup loop started. "
@@ -32,7 +38,7 @@ def _ratelimit_cache_loop() -> None:
         removed_api = cleanup_inactive_ratelimiters(RATELIMIT_CACHE_MAX_INACTIVE_SECONDS)
         removed_password = cleanup_inactive_password_ratelimiters() # This cleanup uses another default time
         removed_cookie = cleanup_inactive_cookie_ratelimiters(RATELIMIT_CACHE_MAX_INACTIVE_SECONDS)
-        removed_expired_cookie_rows = asyncio.run(delete_expired_auth_cookies())
+        removed_expired_cookie_rows = asyncio.run(_delete_expired_auth_cookies_with_service_session())
 
         if (removed_api + removed_password + removed_cookie + removed_expired_cookie_rows) > 0:
             log_message(

@@ -5,7 +5,7 @@ Use this format when adding a new endpoint family or a new database feature.
 ## API Folder Shape
 
 ```text
-src/api/<feature_name>/
+src/api/system/<feature_name>/
   models.py
   routes/
     __init__.py

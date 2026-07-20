@@ -4,9 +4,10 @@ import threading
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
+from fastapi.responses import RedirectResponse
 
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT
-from src.api.config import PERM_LEVEL_MAP
+from src.api.config import PERM_LEVEL_MAP, COOKIE_JWT_INDEX
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.ratelimit import RateLimit
@@ -71,13 +72,13 @@ async def _obtain_ratelimit(token_hash: str) -> RateLimit:
         return _place_in_ratelimiters(token_hash, configured_limit)
 
 
-def cookie_authentication(permission_level: int = 0):
+def cookie_authentication(permission_level: int = 0, redirect_url: str | None = None):
     """Decorator that validates a cookie JWT and enforces per-token rate limits."""
     def decorator(func):
         @wraps(func)
         async def wrapper(request, *args, **kwargs):
             client_ip = _client_ip(request)
-            cookie_token = getattr(request, "cookie_token", "") or getattr(request, "token", "")
+            cookie_token = getattr(request, COOKIE_JWT_INDEX, "")
             if not cookie_token:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",
@@ -85,6 +86,8 @@ def cookie_authentication(permission_level: int = 0):
                     message="Cookie authentication failed: missing cookie token",
                     ip_address=client_ip,
                 )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Missing cookie token.")
 
             token_payload = decode_jwt_token(cookie_token)
@@ -95,6 +98,8 @@ def cookie_authentication(permission_level: int = 0):
                     message="Cookie authentication failed: invalid JWT payload",
                     ip_address=client_ip,
                 )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token.")
 
             token_hash = hash_token(cookie_token)
@@ -106,6 +111,8 @@ def cookie_authentication(permission_level: int = 0):
                     message=f"Cookie authentication failed: unregistered token hash={token_hash[:12]}",
                     ip_address=client_ip,
                 )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token is not registered.")
             if cookie_row.revoked:
                 await safe_add_persistent_log(
@@ -114,6 +121,8 @@ def cookie_authentication(permission_level: int = 0):
                     message=f"Cookie authentication failed: revoked token hash={token_hash[:12]}",
                     ip_address=client_ip,
                 )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token has been revoked.")
             if cookie_row.expires_at <= datetime.now(timezone.utc):
                 await safe_add_persistent_log(
@@ -122,6 +131,8 @@ def cookie_authentication(permission_level: int = 0):
                     message=f"Cookie authentication failed: expired token hash={token_hash[:12]}",
                     ip_address=client_ip,
                 )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token has expired.")
 
             ratelimit = await _obtain_ratelimit(token_hash)
@@ -138,6 +149,8 @@ def cookie_authentication(permission_level: int = 0):
                     ),
                     ip_address=client_ip,
                 )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=403, detail="Insufficient permissions.")
 
             allowed, status = ratelimit.is_allowed()

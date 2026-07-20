@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.crud.system.user_crud import get_user_by_username
+from src.security.tokens import create_jwt_token
 from src.security.ratelimit import RateLimit
 
 from src.security.tokens import verify_password
@@ -58,6 +59,7 @@ async def _obtain_ratelimit(username: str) -> RateLimit:
             _last_seen_by_user[username] = time.time()
             return existing
         return _place_in_ratelimiters(username, configured_limit)
+    
 
 
 async def authenticate_password(username: str, password: str, ip_address: str) -> bool:
@@ -104,3 +106,13 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
     )
     
     return True
+
+async def auth_and_grant_token(username: str, password: str, ip_address: str, expiration: int | None = None) -> str:
+    """Authenticate a user by username and password, and return a JWT token on success."""
+    success = await authenticate_password(username, password, ip_address)
+    
+    if not success:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    
+    token = create_jwt_token(username, expires_minutes=expiration)
+    return token

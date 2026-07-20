@@ -11,7 +11,7 @@ from src.models.crud.system.api_key_crud import get_api_key
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.tokens import hash_token
 from src.security.ratelimit import RateLimit
-from src.api.models import RequestBase
+from src.api.models import APIRequestBase
 from src.api.config import PERM_LEVEL_MAP
 from src.services.logging import log_message
 
@@ -20,7 +20,7 @@ _last_seen_by_key: dict[str, float] = {}
 _cache_lock = threading.Lock()
 
 
-def _client_ip(request: RequestBase | None) -> str | None:
+def _client_ip(request: APIRequestBase | None) -> str | None:
     if request is None:
         return None
     client = getattr(request, "client", None)
@@ -108,7 +108,7 @@ def api_authentication(permission_level: int):
     """Decorator to validate API key and enforce rate limiting."""
     def decorator(func):
         @wraps(func)
-        async def wrapper(request: RequestBase, *args, **kwargs):
+        async def wrapper(request: APIRequestBase, *args, **kwargs):
             api_key = request.api_key
             fingerprint = _key_fingerprint(api_key)
             client_ip = _client_ip(request)
