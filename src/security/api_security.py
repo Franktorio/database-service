@@ -46,6 +46,28 @@ def _place_in_ratelimiters(api_key: ApiKey) -> RateLimit:
     log_message(f"[DEBUG] [API VALIDATE] Placed API key {api_hash} in rate limiters with limit {api_key.rate_limit}.")
     return _ratelimiters[api_hash]
 
+def refresh_ratelimiter(api_key: ApiKey) -> RateLimit:
+    """Refresh the RateLimit instance for the given API key in the ratelimiters dictionary. Use when the API key's rate limit has changed in the database."""
+    api_hash = api_key.key_hash
+    limit = api_key.rate_limit
+    level = api_key.permission_level
+    current_time = time.time()
+    _ratelimiters[api_hash] = RateLimit(limit=limit, key_hash=api_hash, permission_level=level)
+    _last_seen_by_key[api_hash] = current_time
+    log_message(f"[DEBUG] [API VALIDATE] Refreshed API key {api_hash} in rate limiters with new limit {api_key.rate_limit}.")
+    return _ratelimiters[api_hash]
+
+def remove_ratelimiter(api_hash: str) -> bool:
+    """Remove the RateLimit instance for the given API key from the ratelimiters dictionary. Returns True if removed, False if not found."""
+    with _cache_lock:
+        removed = _ratelimiters.pop(api_hash, None) is not None
+        _last_seen_by_key.pop(api_hash, None)
+    if removed:
+        log_message(f"[DEBUG] [API VALIDATE] Removed API key {api_hash} from rate limiters.")
+    else:
+        log_message(f"[DEBUG] [API VALIDATE] Attempted to remove API key {api_hash} from rate limiters, but it was not found.")
+    return removed
+
 def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
     """Remove cached ratelimiters that have been inactive longer than the given threshold."""
     now = time.time()
