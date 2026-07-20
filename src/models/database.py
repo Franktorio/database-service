@@ -3,7 +3,7 @@
 from src.models.base import Base
 import src.models.tables #ignore
 
-from config.loader import DATABASE_URL
+from config.loader import DATABASE_URL, OPERATING_MODE
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import NullPool
@@ -13,7 +13,7 @@ PRINT_PREFIX = "DATABASE"
 
 engine = create_async_engine(
     DATABASE_URL,
-    echo=True,
+    echo=(OPERATING_MODE == "development"),
     poolclass=NullPool,
 )
 
