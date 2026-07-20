@@ -4,14 +4,18 @@ import threading
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.responses import RedirectResponse
+from starlette.responses import Response
 
+from config.loader import JWT_EXP_MINUTES
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT
-from src.api.config import PERM_LEVEL_MAP, COOKIE_JWT_INDEX
-from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
+from src.api.config import COOKIE_JWT_INDEX
+from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash, refresh_auth_cookie
+from src.models.crud.system.user_crud import get_user_by_username
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.ratelimit import RateLimit
-from src.security.tokens import decode_jwt_token, hash_token
+from src.security.tokens import create_jwt_token, decode_jwt_token, get_cookie_settings, hash_token
 from src.services.logging import log_message
 
 _ratelimiters: dict[str, RateLimit] = {}
@@ -72,13 +76,15 @@ async def _obtain_ratelimit(token_hash: str) -> RateLimit:
         return _place_in_ratelimiters(token_hash, configured_limit)
 
 
-def cookie_authentication(permission_level: int = 0, redirect_url: str | None = None):
-    """Decorator that validates a cookie JWT and enforces per-token rate limits."""
+def cookie_authentication(required_roles: set[str] | None = None, redirect_url: str | None = None):
+    """Decorator that validates a cookie JWT, enforces optional role checks, and per-token rate limits."""
+    normalized_roles = {role.lower() for role in (required_roles or set())}
+
     def decorator(func):
         @wraps(func)
         async def wrapper(request, *args, **kwargs):
             client_ip = _client_ip(request)
-            cookie_token = getattr(request, COOKIE_JWT_INDEX, "")
+            cookie_token = request.cookies.get(COOKIE_JWT_INDEX)
             if not cookie_token:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",
@@ -135,23 +141,47 @@ def cookie_authentication(permission_level: int = 0, redirect_url: str | None = 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token has expired.")
 
-            ratelimit = await _obtain_ratelimit(token_hash)
-            effective_permission_level = int(token_payload.get("permission_level", 0))
+            username = str(token_payload.get("username", "")).strip()
+            if not username:
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message="Cookie authentication failed: missing username claim",
+                    ip_address=client_ip,
+                )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
+                raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
 
-            if effective_permission_level < permission_level:
+            user = await get_user_by_username(username)
+            if user is None:
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message=f"Cookie authentication failed: user not found username={username}",
+                    ip_address=client_ip,
+                )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
+                raise HTTPException(status_code=401, detail="User no longer exists.")
+
+            effective_role = (user.role or "").lower()
+            if normalized_roles and effective_role not in normalized_roles:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",
                     log_level="WARNING",
                     message=(
-                        "Cookie authentication failed: insufficient permissions "
-                        f"username={token_payload.get('username', '')} required={permission_level} "
-                        f"found={effective_permission_level}"
+                        "Cookie authentication failed: insufficient role "
+                        f"username={username} required_roles={sorted(normalized_roles)} "
+                        f"found_role={effective_role}"
                     ),
                     ip_address=client_ip,
                 )
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
-                raise HTTPException(status_code=403, detail="Insufficient permissions.")
+                raise HTTPException(status_code=403, detail="Insufficient role.")
+
+            ratelimit = await _obtain_ratelimit(token_hash)
 
             allowed, status = ratelimit.is_allowed()
             if not allowed:
@@ -160,7 +190,7 @@ def cookie_authentication(permission_level: int = 0, redirect_url: str | None = 
                     log_level="WARNING",
                     message=(
                         "Cookie rate limit exceeded "
-                        f"username={token_payload.get('username', '')} retry_after={status:.2f}s"
+                        f"username={username} retry_after={status:.2f}s"
                     ),
                     ip_address=client_ip,
                 )
@@ -170,10 +200,8 @@ def cookie_authentication(permission_level: int = 0, redirect_url: str | None = 
                 )
 
             request._cookie_data = {
-                "subject": token_payload.get("sub", ""),
-                "username": token_payload.get("username", ""),
-                "permission_level": effective_permission_level,
-                "permission_name": PERM_LEVEL_MAP.get(effective_permission_level, "UNKNOWN"),
+                "username": username,
+                "role": effective_role,
                 "token_hash": token_hash[:12],
                 "rate_limit": ratelimit.limit,
                 "requests_remaining": ratelimit.limit - ratelimit.requests,
@@ -182,18 +210,51 @@ def cookie_authentication(permission_level: int = 0, redirect_url: str | None = 
 
             log_message(
                 f"[DEBUG] [COOKIE SECURITY] Cookie auth accepted for user "
-                f"{request._cookie_data['username']} with level {effective_permission_level}."
+                f"{request._cookie_data['username']} with role {effective_role}."
             )
             await safe_add_persistent_log(
                 log_type="USER AUTH",
                 log_level="INFO",
                 message=(
                     "Cookie authentication accepted "
-                    f"username={request._cookie_data['username']} permission={effective_permission_level}"
+                    f"username={request._cookie_data['username']} role={effective_role}"
                 ),
                 ip_address=client_ip,
             )
-            return await func(request, *args, **kwargs)
+
+            refreshed_token, refreshed_expires_at = create_jwt_token(
+                username=request._cookie_data["username"],
+                role=effective_role,
+                expires_minutes=JWT_EXP_MINUTES,
+            )
+            refreshed_token_hash = hash_token(refreshed_token)
+            refreshed_cookie_row = await refresh_auth_cookie(
+                token_hash=token_hash,
+                new_token_hash=refreshed_token_hash,
+                new_expires_at=refreshed_expires_at,
+            )
+            if refreshed_cookie_row is None:
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message=(
+                        "Cookie authentication failed during refresh: "
+                        f"missing token hash={token_hash[:12]}"
+                    ),
+                    ip_address=client_ip,
+                )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
+                raise HTTPException(status_code=401, detail="Cookie token could not be refreshed.")
+
+            request._cookie_data["token_hash"] = refreshed_token_hash[:12]
+
+            response = await func(request, *args, **kwargs)
+            if not isinstance(response, Response):
+                response = JSONResponse(content=response)
+
+            response.set_cookie(**get_cookie_settings(expires_minutes=JWT_EXP_MINUTES), value=refreshed_token)
+            return response
 
         return wrapper
 

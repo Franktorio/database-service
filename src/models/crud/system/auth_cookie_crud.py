@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from src.models.database import SessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,6 +81,68 @@ async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = Non
         await session.close()
 
     return True
+
+
+async def refresh_auth_cookie(
+    token_hash: str,
+    new_token_hash: str,
+    new_expires_at: datetime,
+    session: AsyncSession | None = None,
+) -> AuthCookie | None:
+    """Rotate a cookie JWT tracking row to a new hash and expiration."""
+    close_session = False
+    if session is None:
+        session = SessionLocal()
+        close_session = True
+
+    stmt = select(AuthCookie).where(AuthCookie.token_hash == token_hash)
+    result = await session.execute(stmt)
+    row = result.scalar_one_or_none()
+    if row is None:
+        log_message(f"[WARNING] [{PRINT_PREFIX}] No auth cookie found to refresh.")
+        if close_session:
+            await session.close()
+        return None
+
+    row.token_hash = new_token_hash
+    row.expires_at = new_expires_at
+    row.revoked = False
+    await session.commit()
+    await session.refresh(row)
+    log_message(f"[INFO] [{PRINT_PREFIX}] Refreshed auth cookie row id {row.id}.")
+
+    if close_session:
+        await session.close()
+
+    return row
+
+
+async def revoke_expired_auth_cookies(
+    now: datetime | None = None,
+    session: AsyncSession | None = None,
+) -> int:
+    """Mark expired cookie JWT tracking rows as revoked."""
+    check_time = now or datetime.now(timezone.utc)
+    close_session = False
+    if session is None:
+        session = SessionLocal()
+        close_session = True
+
+    stmt = (
+        update(AuthCookie)
+        .where(AuthCookie.expires_at <= check_time, AuthCookie.revoked.is_(False))
+        .values(revoked=True)
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    revoked = result.rowcount or 0
+    if revoked > 0:
+        log_message(f"[INFO] [{PRINT_PREFIX}] Revoked {revoked} expired auth cookie rows.")
+
+    if close_session:
+        await session.close()
+
+    return revoked
 
 
 async def delete_expired_auth_cookies(

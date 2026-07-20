@@ -29,6 +29,11 @@
         "sweep_interval": 60,
         "max_inactive_seconds": 900
     },
+    "cookie_expiry":
+    {
+        "enabled": true,
+        "sweep_interval": 60
+    },
     "ip_block_cache":
     {
         "enabled": true,

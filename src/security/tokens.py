@@ -87,9 +87,8 @@ def verify_password(
 
 
 def create_jwt_token(
-    subject: str,
     username: str,
-    permission_level: int = 0,
+    role: str,
     expires_minutes: int = JWT_EXP_MINUTES,
 ) -> tuple[str, datetime]:
     """Create a signed JWT token for cookie authentication."""
@@ -99,9 +98,8 @@ def create_jwt_token(
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=expires_minutes)
     payload = {
-        "sub": subject,
         "username": username,
-        "permission_level": permission_level,
+        "role": role,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
@@ -149,16 +147,14 @@ def decode_jwt_token(token: str) -> dict | None:
 
 
 async def create_cookie_token(
-    subject: str,
     username: str,
-    permission_level: int = 0,
+    role: str,
     expires_minutes: int = JWT_EXP_MINUTES,
 ) -> str:
     """Create a JWT token and persist a hash for revocation/rate-limiting checks."""
     token, expires_at = create_jwt_token(
-        subject=subject,
         username=username,
-        permission_level=permission_level,
+        role=role,
         expires_minutes=expires_minutes,
     )
     token_hash = hash_token(token)

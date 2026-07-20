@@ -3,6 +3,7 @@
 import uvicorn
 import fastapi
 from fastapi import Request
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from config.loader import API_ENABLED, API_PORT
@@ -14,7 +15,7 @@ from src.security.password_security import auth_and_grant_token
 from src.security.cookie_security import cookie_authentication
 from src.models.database import init_db
 
-from src.api.config import VIEW_LEVEL
+from src.api.config import VIEW_LEVEL, COOKIE_JWT_INDEX
 
 from src.api.models import APIRequestBase, LoginRequestBase, JWTRequestBase
 from src.services.logging import log_message
@@ -50,7 +51,7 @@ def start_api_server():
     uvicorn.run(app, host="0.0.0.0", port=API_PORT)
     
 
-@app.post("/")
+@app.get("/")
 @with_ip_block
 async def root(request: Request):
     """Root endpoint for the API service; returns a simple greeting message."""
@@ -68,21 +69,33 @@ async def auth_test(request: APIRequestBase):
 
 @app.post("/login-auth-test")
 @with_ip_block
-async def login_test(http_request: Request, request: LoginRequestBase):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Login test endpoint called for user: {request.username}.")
-    token = await auth_and_grant_token(
-        username=request.username,
-        password=request.password,
-        ip_address=http_request.client.host if http_request.client else None,
-        expiration=10 
+async def login_test(login_request: LoginRequestBase, request: Request,):
+    log_message(
+        f"[DEBUG] [{PRINT_PREFIX}] Login test endpoint called for user: {login_request.username}."
     )
-    return {"token": token}
+
+    token, _ = await auth_and_grant_token(
+        username=login_request.username,
+        password=login_request.password,
+        ip_address=request.client.host if request.client else None
+    )
+    
+    response = JSONResponse(content={"message": "Login successful."})
+    
+    response.set_cookie(
+        key=COOKIE_JWT_INDEX,
+        value=token,
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="Strict",
+        max_age=600,  # 10 minutes
+    )
+    return response
 
 @app.post("/cookie-auth-test")
 @with_ip_block
-@cookie_authentication(permission_level=VIEW_LEVEL)
-async def cookie_test(request: JWTRequestBase):
+@cookie_authentication()
+async def cookie_test(request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Cookie auth test endpoint called.")
-    return {
-        "message": f"Cookie auth is valid: {request._cookie_data}"
-    }
+    response = JSONResponse(content={"message": "Cookie authentication successful."})
+    return response

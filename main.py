@@ -8,6 +8,7 @@ PRINT_PREFIX = "MAIN"
 def main():
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting database service bootstrap.")
     from src.services.service_layer import start_backup_service
+    from src.services.service_layer import start_cookie_expiry_service
     from src.services.service_layer import start_healthcheck_service
     from src.services.service_layer import start_ip_block_cache_service
     from src.services.service_layer import start_ratelimit_cache_service
@@ -17,6 +18,7 @@ def main():
     
     start_backup_service()
     start_healthcheck_service()
+    start_cookie_expiry_service()
     start_ratelimit_cache_service()
     start_ip_block_cache_service()
 

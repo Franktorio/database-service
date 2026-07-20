@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.crud.system.user_crud import get_user_by_username
-from src.security.tokens import create_jwt_token
+from src.security.tokens import create_cookie_token
 from src.security.ratelimit import RateLimit
 
 from src.security.tokens import verify_password
@@ -105,14 +105,19 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
         ip_address=ip_address,
     )
     
-    return True
+    return user
 
-async def auth_and_grant_token(username: str, password: str, ip_address: str, expiration: int | None = None) -> str:
+async def auth_and_grant_token(username: str, password: str, ip_address: str, expiration: int | None = None) -> tuple[str, int | None]:
     """Authenticate a user by username and password, and return a JWT token on success."""
-    success = await authenticate_password(username, password, ip_address)
+    user = await authenticate_password(username, password, ip_address)
     
-    if not success:
+    if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
+
+    token = await create_cookie_token(
+        username=user.username,
+        role=user.role,
+        expires_minutes=expiration or 10,
+    )
+    return token, expiration
     
-    token = create_jwt_token(username, expires_minutes=expiration)
-    return token
