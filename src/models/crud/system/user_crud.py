@@ -12,7 +12,7 @@ PRINT_PREFIX = "USER CRUD"
 async def add_user(
     username: str,
     password_hash: str,
-    role: str,
+    initial_role: str,
     email: str = "",
     password_salt: str = "",
     hash_iterations: int = 210000,
@@ -21,11 +21,11 @@ async def add_user(
     session: AsyncSession | None = None,
 ) -> User:
     """Add a new user to the database."""
-    normalized_role = role.strip().lower()
+    normalized_role = initial_role.strip().lower()
     if not normalized_role:
         raise ValueError("User creation requires a non-empty role.")
 
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Adding user {username} with role {role}.")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Adding user {username} with role {initial_role}.")
     close_session = False
     if session is None:
         session = SessionLocal()

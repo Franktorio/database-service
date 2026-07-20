@@ -34,7 +34,7 @@ async def create_user(request: UserCreateRequest):
         hash_iterations=PASSWORD_HASH_ITERATIONS,
         hash_algorithm=PASSWORD_HASH_ALGORITHM,
         email=request.email,
-        role=request.role,
+        initial_role=request.initial_role,
         login_rate_limit=request.login_rate_limit,
     )
 
@@ -45,7 +45,7 @@ async def create_user(request: UserCreateRequest):
             "username": created_user.username,
             "email": created_user.email,
             "roles": created_user.roles,
-            "role": created_user.role,
+            "initial_role": created_user.initial_role,
             "login_rate_limit": created_user.login_rate_limit,
             "hash_algorithm": created_user.hash_algorithm,
             "hash_iterations": created_user.hash_iterations,

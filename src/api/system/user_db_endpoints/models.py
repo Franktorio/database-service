@@ -8,7 +8,7 @@ class UserCreateRequest(APIRequestBase):
 
     username: str
     password: str
-    role: str
+    initial_role: str
     email: str = ""
     login_rate_limit: int = 10
 

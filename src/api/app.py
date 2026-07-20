@@ -83,7 +83,7 @@ async def login_test(login_request: LoginRequestBase, request: Request,):
         username=login_request.username,
         password=login_request.password,
         ip_address=request.client.host if request.client else None,
-        expiration_minutes=TEST_DEFAULTS["expiration_minutes"], # Token valid for 10 minutes; only for testing purposes
+        expiration=TEST_DEFAULTS["expiration_minutes"], # Token valid for 10 minutes; only for testing purposes
     )
     
     response = JSONResponse(content={"message": "Login successful."})
