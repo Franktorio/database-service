@@ -246,6 +246,11 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token could not be refreshed.")
+            
+            old_ratelimit = _ratelimiters.pop(token_hash, None)
+            if old_ratelimit is not None:
+                _last_seen_by_token.pop(token_hash, None)
+                _place_in_ratelimiters(refreshed_token_hash, old_ratelimit.limit)
 
             request._cookie_data["token_hash"] = refreshed_token_hash[:12]
 
