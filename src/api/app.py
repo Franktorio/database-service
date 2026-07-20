@@ -13,14 +13,19 @@ from src.security.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.security.password_security import auth_and_grant_token
 from src.security.cookie_security import cookie_authentication
+from src.security.tokens import get_cookie_settings
 from src.models.database import init_db
 
 from src.api.config import VIEW_LEVEL, COOKIE_JWT_INDEX
 
-from src.api.models import APIRequestBase, LoginRequestBase, JWTRequestBase
+from src.api.models import APIRequestBase, LoginRequestBase
 from src.services.logging import log_message
 
 PRINT_PREFIX = "API APP"
+
+TEST_DEFAULTS = {
+    "expiration_minutes": 10,  # Token valid for 10 minutes; only for testing purposes
+}
 
 @asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):
@@ -77,19 +82,13 @@ async def login_test(login_request: LoginRequestBase, request: Request,):
     token, _ = await auth_and_grant_token(
         username=login_request.username,
         password=login_request.password,
-        ip_address=request.client.host if request.client else None
+        ip_address=request.client.host if request.client else None,
+        expiration_minutes=TEST_DEFAULTS["expiration_minutes"], # Token valid for 10 minutes; only for testing purposes
     )
     
     response = JSONResponse(content={"message": "Login successful."})
+    response.set_cookie(**get_cookie_settings(expires_minutes=TEST_DEFAULTS["expiration_minutes"]), value=token)
     
-    response.set_cookie(
-        key=COOKIE_JWT_INDEX,
-        value=token,
-        httponly=True,
-        secure=False,  # Set to True in production with HTTPS
-        samesite="Strict",
-        max_age=600,  # 10 minutes
-    )
     return response
 
 @app.post("/cookie-auth-test")

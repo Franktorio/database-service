@@ -12,13 +12,13 @@ from config.loader import (
     API_KEY_PEPPER,
     API_KEY_TOKEN_BYTES,
     JWT_ALGORITHM,
-    JWT_COOKIE_NAME,
     JWT_EXP_MINUTES,
     JWT_SECRET,
     PASSWORD_HASH_ALGORITHM,
     PASSWORD_HASH_ITERATIONS,
     PASSWORD_PEPPER,
 )
+from src.api.config import COOKIE_JWT_INDEX
 from src.models.crud.system.api_key_crud import add_api_key, get_api_key
 from src.models.crud.system.auth_cookie_crud import add_auth_cookie
 from src.services.logging import log_message
@@ -170,7 +170,7 @@ def get_cookie_settings(expires_minutes: int = JWT_EXP_MINUTES) -> dict:
     """Return default cookie settings for storing JWT tokens client-side."""
     max_age = expires_minutes * 60
     return {
-        "key": JWT_COOKIE_NAME,
+        "key": COOKIE_JWT_INDEX,
         "httponly": True,
         "secure": True,
         "samesite": "lax",
