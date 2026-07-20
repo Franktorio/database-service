@@ -6,6 +6,8 @@ initialize_logging()
 PRINT_PREFIX = "MAIN"
 
 def main():
+    for _ in range(5):
+        log_message(f"{'#' * 30}")
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting database service bootstrap.")
     from src.services.service_layer import start_backup_service
     from src.services.service_layer import start_cookie_expiry_service
@@ -23,7 +25,7 @@ def main():
     start_ip_block_cache_service()
 
     start_api_server()
-    log_message(f"[INFO] [{PRINT_PREFIX}] API startup routine completed.")
+    log_message(f"[INFO] [{PRINT_PREFIX}] API startup routine concluded.")
 
 if __name__ == "__main__":
     main()
