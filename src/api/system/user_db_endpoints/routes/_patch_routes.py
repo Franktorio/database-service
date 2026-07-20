@@ -26,11 +26,17 @@ PRINT_PREFIX = "PATCH USER DB ROUTES"
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def patch_user(request: UserUpdateRequest):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user update request for username {request.username}.")
-    updated = await update_user(
-        request.username,
-        new_email=request.new_email,
-        new_role=request.new_role,
-    )
+    try:
+        updated = await update_user(
+            request.username,
+            new_email=request.new_email,
+            set_roles=request.set_roles,
+            add_role=request.add_role,
+            remove_role=request.remove_role,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     if updated is None:
         raise HTTPException(status_code=404, detail=f"User '{request.username}' not found.")
 
@@ -40,6 +46,7 @@ async def patch_user(request: UserUpdateRequest):
             "id": updated.id,
             "username": updated.username,
             "email": updated.email,
+            "roles": updated.roles,
             "role": updated.role,
             "login_rate_limit": updated.login_rate_limit,
             "hash_algorithm": updated.hash_algorithm,

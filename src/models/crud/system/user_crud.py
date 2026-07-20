@@ -12,8 +12,8 @@ PRINT_PREFIX = "USER CRUD"
 async def add_user(
     username: str,
     password_hash: str,
+    role: str,
     email: str = "",
-    role: str = "user",
     password_salt: str = "",
     hash_iterations: int = 210000,
     hash_algorithm: str = "pbkdf2_sha256",
@@ -21,6 +21,10 @@ async def add_user(
     session: AsyncSession | None = None,
 ) -> User:
     """Add a new user to the database."""
+    normalized_role = role.strip().lower()
+    if not normalized_role:
+        raise ValueError("User creation requires a non-empty role.")
+
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Adding user {username} with role {role}.")
     close_session = False
     if session is None:
@@ -35,7 +39,7 @@ async def add_user(
         hash_algorithm=hash_algorithm,
         login_rate_limit=login_rate_limit,
         email=email,
-        role=role,
+        roles=[normalized_role],
     )
     session.add(user)
     await session.commit()
@@ -87,10 +91,12 @@ async def get_user_by_username(username: str, session: AsyncSession | None = Non
 async def update_user(
     username: str,
     new_email: str | None = None,
-    new_role: str | None = None,
+    set_roles: list[str] | None = None,
+    add_role: str | None = None,
+    remove_role: str | None = None,
     session: AsyncSession | None = None,
 ) -> User | None:
-    """Update a user's email and/or role."""
+    """Update a user's email and/or roles."""
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating user {username}.")
     close_session = False
     if session is None:
@@ -108,8 +114,45 @@ async def update_user(
     await delete_auth_cookies_by_username(username, session=session)
     if new_email is not None:
         user.email = new_email
-    if new_role is not None:
-        user.role = new_role
+
+    role_changed = False
+    current_roles = [role.strip().lower() for role in (user.roles or []) if role and role.strip()]
+
+    if set_roles is not None:
+        normalized_set_roles: list[str] = []
+        for role in set_roles:
+            normalized_role = role.strip().lower()
+            if not normalized_role:
+                raise ValueError("set_roles cannot contain empty role values.")
+            if normalized_role not in normalized_set_roles:
+                normalized_set_roles.append(normalized_role)
+
+        if not normalized_set_roles:
+            raise ValueError("set_roles must contain at least one role.")
+
+        current_roles = normalized_set_roles
+        role_changed = True
+
+    if add_role is not None:
+        normalized_add_role = add_role.strip().lower()
+        if not normalized_add_role:
+            raise ValueError("add_role must be non-empty when provided.")
+        if normalized_add_role not in current_roles:
+            current_roles.append(normalized_add_role)
+            role_changed = True
+
+    if remove_role is not None:
+        normalized_remove_role = remove_role.strip().lower()
+        if not normalized_remove_role:
+            raise ValueError("remove_role must be non-empty when provided.")
+        if normalized_remove_role in current_roles:
+            if len(current_roles) == 1:
+                raise ValueError("Cannot remove the last remaining role from a user.")
+            current_roles = [role for role in current_roles if role != normalized_remove_role]
+            role_changed = True
+
+    if role_changed:
+        user.roles = current_roles
 
     await session.commit()
     await session.refresh(user)

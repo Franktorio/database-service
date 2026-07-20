@@ -8,8 +8,8 @@ class UserCreateRequest(APIRequestBase):
 
     username: str
     password: str
+    role: str
     email: str = ""
-    role: str = "user"
     login_rate_limit: int = 10
 
 
@@ -18,7 +18,9 @@ class UserUpdateRequest(APIRequestBase):
 
     username: str
     new_email: str | None = None
-    new_role: str | None = None
+    set_roles: list[str] | None = None
+    add_role: str | None = None
+    remove_role: str | None = None
 
 
 class UserPasswordUpdateRequest(APIRequestBase):

@@ -44,6 +44,7 @@ async def create_user(request: UserCreateRequest):
             "id": created_user.id,
             "username": created_user.username,
             "email": created_user.email,
+            "roles": created_user.roles,
             "role": created_user.role,
             "login_rate_limit": created_user.login_rate_limit,
             "hash_algorithm": created_user.hash_algorithm,

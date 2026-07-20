@@ -18,6 +18,9 @@ PERM_LEVEL_MAP = {
     SUPER_ADMIN_LEVEL: "SUPER_ADMIN",
 }
 
+USER_MAP: dict[str, list[str]] = {}
+
 log_message(f"[DEBUG] [{PRINT_PREFIX}] Permission levels loaded: {PERM_LEVEL_MAP}")
+log_message(f"[DEBUG] [{PRINT_PREFIX}] User map loaded with {len(USER_MAP)} entries.")
 
 COOKIE_JWT_INDEX = "auth_token"
