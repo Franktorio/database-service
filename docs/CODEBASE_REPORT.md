@@ -1,231 +1,375 @@
 # Full Codebase Report
 
+## Report Metadata
+
+- Date: 2026-07-21
+- Basis: current `main` branch at HEAD (`d571020`)
+- Review type: static code audit + diagnostics review
+- Runtime status: not benchmarked in this pass
+
+This report supersedes prior versions and is a full current-state assessment.
+
 ## Scope
 
-This report updates the prior audit using the repository state on 2026-07-21. It focuses on what changed since commit 44582af, re-scores priorities, and adds concrete fix suggestions.
+This review covers:
 
-Review method:
+- Startup/bootstrap and service lifecycle
+- Config loading and environment controls
+- API contracts and request validation
+- API key auth and cache invalidation behavior
+- Password and cookie auth flows
+- Rate limiting and IP blocking
+- Database schema, CRUD, and index usage
+- Healthcheck/backup/restore services
+- Migration scripts and operational safety
+- Documentation accuracy vs code behavior
 
-- Read-only source inspection of modified files since 44582af.
-- Validation of editor diagnostics (`get_errors`) on key changed modules.
-- No runtime integration test execution in this pass.
+## Executive Summary
 
-## What You Fixed Since The Last Report
+The codebase is improving quickly and several previously high-risk issues were fixed. The overall architecture remains clear and maintainable for a single-node service. However, one new critical regression in the healthcheck module can break service startup, and there are still important correctness/operations gaps that keep this below production-grade industry standards.
 
-These issues are now materially improved:
+In plain terms:
 
-1. Cookie/JWT config consistency improved.
-- Cookie settings are now centralized through `get_cookie_settings` and used by login and refresh flows.
-- Cookie key usage now converges on `COOKIE_JWT_INDEX` instead of split naming.
+- Direction: better than last audit.
+- Immediate risk: still high due to one startup-breaking import issue.
+- Capacity class: unchanged (small to moderate single-node workload).
 
-2. API key cache invalidation improved.
-- API key delete/update flows now call ratelimiter cache management functions.
-- This reduces stale authorization behavior after key changes.
+## What Was Fixed Since The Previous Audit
 
-3. SQL echo behavior improved.
-- DB engine echo now depends on operating mode (`development` only), which is closer to sane production defaults.
+1. API model validation improved.
+- Pydantic `Field(...)` constraints and metadata were added across request models.
+- This is a major step toward predictable contract behavior.
 
-4. Cookie ratelimit bypass from token rotation was partially addressed.
-- You now migrate ratelimiter state to the new token hash during refresh, which is directionally correct.
+2. API-key cache freshness improved.
+- Update/delete key flows now invoke ratelimiter refresh/removal helpers.
+- Stale in-memory authorization risk after key changes is reduced.
 
-5. User creation semantics are cleaner.
-- User create now explicitly uses a single initial role (`initial_role`) instead of ambiguous role array entry semantics.
+3. Cookie auth consistency improved.
+- Login and refresh now rely on shared cookie settings (`get_cookie_settings`).
+- Token hash refresh now migrates limiter state (partially lock-protected).
 
-## New Or Remaining High-Risk Findings
+4. User creation response bug fixed.
+- The response no longer references a nonexistent `initial_role` attribute.
 
-## 1) High: API key update route can crash on first successful update
+5. SQL echo behavior improved.
+- SQLAlchemy engine echo is now tied to development mode.
 
-Location:
+6. DB healthcheck strategy changed.
+- Healthcheck moved from `pg_isready`-style probing to actual DB query checks.
+- This is directionally better for functional availability checks.
 
-- `src/api/system/api_db_endpoints/routes/_post_routes.py`
+## Current High-Risk Findings (Most Important First)
+
+### 1) Critical: `dbhealthcheck` imports a symbol that does not exist
+
+Files:
+
+- `src/services/dbhealthcheck.py`
+- `config/loader.py`
+
+Details:
+
+- `dbhealthcheck.py` imports `AsyncSessionLocal` from `config.loader`.
+- `config.loader` does not define `AsyncSessionLocal`.
+- Service-layer imports `dbhealthcheck` at module import time.
+
+Impact:
+
+- Can fail startup with import error before API begins serving.
+- This is an immediate release blocker.
+
+Suggested fix:
+
+- Import `SessionLocal` from `src/models/database.py` instead.
+- Optionally alias: `from src.models.database import SessionLocal as AsyncSessionLocal`.
+- Add a startup smoke test that imports `main` and starts dependency graph without running server.
+
+### 2) High: `refresh_ratelimiter` has async misuse in fallback path
+
+Files:
+
 - `src/security/api_security.py`
 
-Issue:
+Details:
 
-- Route calls `refresh_ratelimiter(updated_api_key.key_hash, updated_api_key.rate_limit)`.
-- `refresh_ratelimiter` in `api_security.py` currently accepts a single `ApiKey` object, not `(key_hash, rate_limit)`.
-- First successful update request will likely raise `TypeError` at runtime.
-
-Impact:
-
-- Admin key update endpoint can fail post-DB update, creating control-plane inconsistency.
-
-Suggested fix:
-
-- Pick one API contract and enforce it everywhere.
-- Recommended: keep `refresh_ratelimiter(api_key: ApiKey)` and call `refresh_ratelimiter(updated_api_key)` from route.
-- Add a focused endpoint test for update flow to catch signature drift.
-
-## 2) High: create-user response references non-existent model field
-
-Location:
-
-- `src/api/system/user_db_endpoints/routes/_post_routes.py`
-- `src/models/tables/system/user_table.py`
-
-Issue:
-
-- Response payload includes `created_user.initial_role`.
-- User model does not expose `initial_role`; it stores `roles` and derived `role` property.
+- `refresh_ratelimiter` is synchronous.
+- Fallback path calls `get_api_key(api_hash)` without `await`.
+- This returns a coroutine, not an `ApiKey` object.
 
 Impact:
 
-- Successful user creation can throw runtime attribute error when forming response.
+- Current route path passes `api_object`, so it often works.
+- Any future caller relying on fallback path may crash or silently misbehave.
 
 Suggested fix:
 
-- Replace `initial_role` response field with `role` (or first element of `roles`).
-- Add create-user response schema test to ensure all returned attributes exist.
+- Remove fallback path entirely and require `api_object: ApiKey`.
+- Or make `refresh_ratelimiter` async and properly await DB lookup.
+- Add type checks/assertion to prevent coroutine leakage.
 
-## 3) High: Cookie ratelimiter state migration is not lock-protected
+### 3) High: Permission-level validation constraints conflict with actual permission map
 
-Location:
+Files:
+
+- `src/api/system/api_db_endpoints/models.py`
+- `src/api/config.py`
+
+Details:
+
+- Permission constants are 0..4 (`VIEW_LEVEL=0`, `SUPER_ADMIN_LEVEL=4`).
+- Request model currently enforces `ge=1, le=5`.
+- Default value is `VIEW_LEVEL` (0), which conflicts with `ge=1` semantics.
+
+Impact:
+
+- View-level key creation can be incorrectly blocked.
+- Undefined permission `5` is allowed by model constraints.
+
+Suggested fix:
+
+- Set constraints to `ge=VIEW_LEVEL` and `le=SUPER_ADMIN_LEVEL`.
+- Optionally validate with `Literal[0,1,2,3,4]` or enum-backed type.
+
+### 4) Medium-High: Cookie ratelimiter migration still not fully lock-safe
+
+Files:
 
 - `src/security/cookie_security.py`
 
-Issue:
+Details:
 
-- Ratelimiter transfer from old token hash to refreshed token hash mutates shared maps without `_cache_lock`.
-- Under concurrency, this can race and produce dropped/misaligned limiter entries.
+- One part of migration (`pop`) is now under `_cache_lock`.
+- Follow-up writes (`_last_seen_by_token.pop` and `_place_in_ratelimiters`) occur outside the lock.
 
 Impact:
 
-- Intermittent authorization throttling bugs; difficult production-debug profile.
+- Race windows still exist under concurrent requests.
+- Could cause intermittent limiter drift/loss.
 
 Suggested fix:
 
-- Wrap pop/insert migration block in `with _cache_lock:`.
-- Prefer a dedicated helper `move_cookie_ratelimiter(old_hash, new_hash)` that is lock-safe and unit-tested.
+- Move full migration sequence under one lock.
+- Use a single helper like `_move_ratelimiter(old_hash, new_hash, old_limit)` guarded by `_cache_lock`.
 
-## 4) High: Healthcheck and restore safety issues remain
+### 5) Medium-High: Healthcheck restore flow still operationally risky
 
-Location:
+Files:
 
 - `src/services/dbhealthcheck.py`
 
-Issue:
+Details:
 
-- Prior high-risk concerns still appear unresolved:
-  - Health check may conflate auth/connectivity conditions with true DB health.
-  - Auto restore still appears risky for in-place replay scenarios.
+- Restore still replays SQL into the active DB.
+- Automatic repeated restore attempts can escalate damage during logical corruption or bad backup chains.
 
 Impact:
 
-- Potential self-inflicted outages or data integrity risk during transient DB incidents.
+- Potential compounding data integrity issues under failure conditions.
 
 Suggested fix:
 
-- Split liveness from readiness checks and make restore/manual intervention opt-in by default.
-- Add explicit preflight checks and dry-run mode before any restore action.
+- Add explicit safety gate: `allow_auto_restore=false` default in production.
+- Validate candidate backup with dry-run checks before restore.
+- Prefer restore into clean target and controlled switchover procedure.
 
-## 5) Medium-High: Input validation gaps still allow unsafe rate-limit values
+## Remaining Important Findings
 
-Location:
+### Startup lifecycle risks
 
+Files:
+
+- `main.py`
+- `src/api/app.py`
+
+Details:
+
+- Background threads start before API lifespan initializes DB schema.
+- If API disabled, daemon threads do not provide persistent worker behavior.
+
+Suggested fix:
+
+- Initialize DB and validate service dependencies first.
+- Start long-lived workers under explicit supervisor semantics.
+
+### Database connection URL safety
+
+Files:
+
+- `config/loader.py`
+
+Details:
+
+- DB password is interpolated directly into URL without URL-encoding.
+
+Suggested fix:
+
+- Build URL with SQLAlchemy URL helpers or quote password safely.
+
+### Distributed behavior limitations
+
+Files:
+
+- `src/security/api_security.py`
+- `src/security/cookie_security.py`
+- `src/security/password_security.py`
+- `src/security/ip_block.py`
+
+Details:
+
+- All abuse controls are process-local in-memory caches.
+
+Suggested fix:
+
+- Move limiter/block state to shared backend (Redis or DB with lease strategy) if horizontal scaling is needed.
+
+### Migration script safety gaps
+
+Files:
+
+- `scripts/migrate_db.py`
+
+Details:
+
+- Compatible-column copy still silently skips incompatible columns.
+- Sequence reset safety remains unverified.
+
+Suggested fix:
+
+- Add explicit post-copy sequence reconciliation.
+- Fail migration on critical compatibility mismatches unless explicitly allowed.
+
+### API documentation drift
+
+Files:
+
+- `docs/API.md`
+- `README.md`
+
+Details:
+
+- User creation docs still describe `role`, but API now expects `initial_role`.
+- README still lists `JWT_COOKIE_NAME` as env, while code now uses `COOKIE_JWT_INDEX` constant.
+
+Suggested fix:
+
+- Update docs to reflect active request models and current cookie-key source.
+
+## Strengths (Current)
+
+1. Strong modular layout.
+- Clear separation between API, security, CRUD, model, and service layers.
+
+2. Security baseline is decent for a small service.
+- Secret checks in non-development mode.
+- Token hashing for API keys and cookie tracking.
+
+3. Indexing posture improved.
+- Useful indexes exist on key auth/log paths.
+
+4. Fix velocity is high.
+- Recent commits show active hardening and response to findings.
+
+## Weaknesses (Current)
+
+1. Operational safety still lags.
+- Healthcheck/restore automation remains risky.
+
+2. Contract consistency is improving but fragile.
+- Validation bounds and permission semantics still misaligned.
+
+3. Shared-state assumptions limit scale.
+- In-memory limiter/block state is single-process only.
+
+4. Test guardrails are still not visible.
+- Regressions can slip into critical auth/admin paths.
+
+## Updated Priority Roadmap
+
+### Priority 0 (Do Now)
+
+1. Fix `AsyncSessionLocal` import break in healthcheck.
+2. Fix `refresh_ratelimiter` fallback async misuse.
+3. Correct permission validation bounds to 0..4 map.
+
+### Priority 1
+
+4. Fully lock cookie ratelimiter migration.
+5. Add startup smoke test + auth/admin contract tests.
+
+### Priority 2
+
+6. Harden restore policy and add safer recovery gates.
+7. Resolve doc drift (`initial_role`, cookie key behavior).
+
+### Priority 3
+
+8. Improve DB URL construction safety.
+9. Add migration post-copy sequence resets and strict mismatch policy.
+10. Plan shared-state backend for abuse controls if multi-instance deployment is expected.
+
+## Suggested Fixes (Concrete)
+
+### Fix Set A (Startup + auth correctness)
+
+- `src/services/dbhealthcheck.py`
+  - Replace import source with `SessionLocal` from `src/models/database.py`.
+  - Use that session factory in `database_query_check`.
+- `src/security/api_security.py`
+  - Refactor `refresh_ratelimiter` to require `api_object` and remove fallback DB fetch.
 - `src/api/system/api_db_endpoints/models.py`
-- `src/api/system/user_db_endpoints/models.py`
+  - Set `permission_level` and `new_permission_level` bounds to 0..4 (or constants-driven).
 
-Issue:
+### Fix Set B (Concurrency + operational resilience)
 
-- Models still rely on plain `int` fields without lower bounds.
-- Zero/negative values can still propagate into runtime limiter logic.
+- `src/security/cookie_security.py`
+  - Make token-hash ratelimiter migration atomic under `_cache_lock`.
+- `src/services/dbhealthcheck.py`
+  - Add `auto_restore_mode` with safer defaults (`disabled` or `manual-confirm`) for production.
+  - Add backup validation and explicit alert path before restore attempts.
 
-Impact:
+### Fix Set C (Reliability guardrails)
 
-- Unstable throttling behavior and possible divide-by-zero style edge paths.
+- Add tests for:
+  - API-key update path including ratelimiter refresh.
+  - User create with `initial_role` payload.
+  - Cookie refresh preserves effective ratelimit state.
+  - App import/startup smoke path catches module import breakages.
 
-Suggested fix:
+## Capacity Estimate (Revalidated)
 
-- Add Pydantic constraints, e.g. `Field(ge=1)` for limits and sensible upper bounds.
-- Add validation error tests for boundary values.
+Assumptions:
 
-## Re-Shifted Priority Order
+- Single uvicorn worker
+- 2-4 vCPU
+- local/same-LAN PostgreSQL
+- default logging and persistent auth event writes enabled
 
-### Priority 0: Fix newly introduced runtime regressions first
+Estimated envelope:
 
-1. Route/function signature mismatch in API-key update flow.
-2. `created_user.initial_role` response bug in user create flow.
+- API-key admin read-heavy traffic: ~100-250 req/s
+- Cookie-auth-heavy flows: ~30-80 req/s
+- Typical concurrently active users: tens to low hundreds
 
-Reason:
+Reason estimate did not increase:
 
-- These are direct request-path breakages that can surface immediately in production/admin usage.
+- Bottlenecks remain mostly architectural (in-memory control state, DB writes on auth path, single-process assumptions), not just micro-bugs.
 
-### Priority 1: Stabilize concurrency and auth correctness
+## Industry Standards Comparison
 
-3. Lock-safe cookie ratelimiter migration.
-4. Add tests for cookie refresh + limiter continuity under concurrent requests.
+Where this now aligns better:
 
-### Priority 2: Reduce operational blast radius
+- Better request validation discipline.
+- Better cache invalidation behavior for API-key lifecycle.
+- Better development-vs-production SQL logging defaults.
 
-5. Harden DB healthcheck signal quality and recovery behavior.
-6. Keep destructive restore path disabled by default unless explicitly enabled.
+Where it is still behind mature production systems:
 
-### Priority 3: Tighten validation and contract safety
+- Startup and recovery safety guarantees.
+- End-to-end automated testing for auth/admin critical paths.
+- Distributed limiter/blocking strategy.
+- Migration rigor and recovery orchestration.
+- Documentation-to-code synchronization discipline.
 
-7. Add Pydantic constraints for rate limits and permission levels.
-8. Add typed response models for key admin endpoints to detect field drift automatically.
+## Bottom Line
 
-### Priority 4: Continue structural maturity work
-
-9. Migrate from ad-hoc migration script to formal migration tooling.
-10. Introduce proxy-aware client IP handling and structured observability.
-
-## Additional Suggestions (Practical)
-
-1. Add a small contract-test suite for the critical admin flows.
-- `POST /api/db/keys/update`
-- `DELETE /api/db/keys/delete`
-- `POST /api/db/users/create`
-- `POST /login-auth-test` and `POST /cookie-auth-test`
-
-2. Add a pre-commit/runtime smoke check in CI.
-- Run lint/type checks and a minimal API integration subset.
-- Catch route/signature mismatches before merge.
-
-3. Move shared cache operations behind helper APIs.
-- Avoid direct map mutations from multiple modules.
-- Enforce lock discipline and consistent semantics.
-
-4. Add a change log section in this report per audit update.
-- Helps show which issues are closed, downgraded, or newly introduced over time.
-
-## Updated Capacity View
-
-Your recent fixes improve reliability and reduce some accidental auth drift, but the overall capacity class is unchanged because the main bottlenecks remain:
-
-- Process-local state for abuse controls.
-- DB writes in auth hot paths.
-- Single-process assumptions.
-
-Reasonable current estimate still stands:
-
-- ~100-250 req/s for simple API-key admin read-heavy traffic.
-- ~30-80 req/s for cookie-auth-heavy flows.
-- Tens to low hundreds of concurrently active users on a modest single node.
-
-## Industry-Standard Comparison (Updated)
-
-Improved relative to previous state:
-
-- Better key/cookie consistency.
-- Better cache invalidation behavior for API key lifecycle.
-- Better production log-noise posture.
-
-Still below mature production standard in key areas:
-
-- No comprehensive automated tests guarding critical auth/admin paths.
-- No distributed/shared throttling state.
-- Recovery automation still risk-prone.
-- Migration safety model is still ad-hoc.
-
-## Recommended Immediate Patch Set
-
-If you want the fastest safety win in one PR:
-
-1. Fix `refresh_ratelimiter` route call signature.
-2. Replace `created_user.initial_role` with `created_user.role` in response.
-3. Add lock around cookie ratelimiter transfer block.
-4. Add request-model validation bounds for all rate-limit fields.
-5. Add 4 focused API tests for create-user, update-key, delete-key, and cookie refresh continuity.
-
-This single bundle would meaningfully lower your current operational risk.
+The codebase is trending in the right direction and is materially better than in the previous audit. The new healthcheck import break is the top blocker and should be fixed immediately. After that, a focused hardening pass on validation consistency, limiter concurrency, and restore safety will give the largest risk reduction per effort.
