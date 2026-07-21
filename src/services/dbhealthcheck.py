@@ -265,11 +265,28 @@ def healthcheck_service():
                 )
                 os.kill(os.getpid(), signal.SIGINT)
 
-def start_healthcheck_service():
+def _wait_for_db_ready(db_ready_signal):
+    while True:
+        if db_ready_signal.is_ready():
+            break
+        time.sleep(1)
+
+
+def _wait_for_db_ready_and_start(db_ready_signal):
+    log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting healthcheck loop.")
+    _wait_for_db_ready(db_ready_signal)
+    log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting healthcheck loop.")
+    healthcheck_service()
+
+
+def start_healthcheck_service(db_ready_signal=None):
     if not HEALTHCHECK_ENABLED:
         log_message(f"[INFO] [{PRINT_PREFIX}] Healthcheck service is disabled in configuration.")
         return
     
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting database healthcheck service...")
-    thread = threading.Thread(target=healthcheck_service, daemon=True, name="DBHealthCheckService")
+    thread_target = healthcheck_service
+    if db_ready_signal is not None:
+        thread_target = lambda: _wait_for_db_ready_and_start(db_ready_signal)
+    thread = threading.Thread(target=thread_target, daemon=True, name="DBHealthCheckService")
     thread.start()

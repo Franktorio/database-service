@@ -35,11 +35,28 @@ def _cookie_expiry_loop() -> None:
         time.sleep(COOKIE_EXPIRY_SWEEP_INTERVAL)
 
 
-def start_cookie_expiry_service() -> None:
+def _wait_for_db_ready(db_ready_signal) -> None:
+    while True:
+        if db_ready_signal.is_ready():
+            break
+        time.sleep(1)
+
+
+def _wait_for_db_ready_and_start(db_ready_signal) -> None:
+    log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting cookie expiry loop.")
+    _wait_for_db_ready(db_ready_signal)
+    log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting cookie expiry loop.")
+    _cookie_expiry_loop()
+
+
+def start_cookie_expiry_service(db_ready_signal=None) -> None:
     if not COOKIE_EXPIRY_SERVICE_ENABLED:
         log_message(f"[INFO] [{PRINT_PREFIX}] Cookie expiry revocation service is disabled.")
         return
 
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting cookie expiry revocation service...")
-    thread = threading.Thread(target=_cookie_expiry_loop, daemon=True, name="CookieExpiryService")
+    thread_target = _cookie_expiry_loop
+    if db_ready_signal is not None:
+        thread_target = lambda: _wait_for_db_ready_and_start(db_ready_signal)
+    thread = threading.Thread(target=thread_target, daemon=True, name="CookieExpiryService")
     thread.start()

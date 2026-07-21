@@ -140,11 +140,28 @@ def _backup_service():
         log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup service sleeping for {INTERVAL} seconds.")
         time.sleep(INTERVAL)
 
-def start_backup_service():
+def _wait_for_db_ready(db_ready_signal):
+    while True:
+        if db_ready_signal.is_ready():
+            break
+        time.sleep(1)
+
+
+def _wait_for_db_ready_and_start(db_ready_signal):
+    log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting backup loop.")
+    _wait_for_db_ready(db_ready_signal)
+    log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting backup loop.")
+    _backup_service()
+
+
+def start_backup_service(db_ready_signal=None):
     if BACKUP_ENABLED:
         log_message(f"[INFO] [{PRINT_PREFIX}] Starting backup service...")
+        thread_target = _backup_service
+        if db_ready_signal is not None:
+            thread_target = lambda: _wait_for_db_ready_and_start(db_ready_signal)
         thread = threading.Thread(
-            target=_backup_service,
+            target=thread_target,
             daemon=True
         )
         thread.start()

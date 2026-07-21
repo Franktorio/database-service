@@ -43,11 +43,28 @@ def _ip_block_cache_loop() -> None:
         time.sleep(IP_BLOCK_CACHE_SWEEP_INTERVAL)
 
 
-def start_ip_block_cache_service() -> None:
+def _wait_for_db_ready(db_ready_signal) -> None:
+    while True:
+        if db_ready_signal.is_ready():
+            break
+        time.sleep(1)
+
+
+def _wait_for_db_ready_and_start(db_ready_signal) -> None:
+    log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting IP block cache loop.")
+    _wait_for_db_ready(db_ready_signal)
+    log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting IP block cache loop.")
+    _ip_block_cache_loop()
+
+
+def start_ip_block_cache_service(db_ready_signal=None) -> None:
     if not IP_BLOCK_CACHE_ENABLED:
         log_message(f"[INFO] [{PRINT_PREFIX}] IP block cache cleanup service is disabled.")
         return
 
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting IP block cache cleanup service...")
-    thread = threading.Thread(target=_ip_block_cache_loop, daemon=True, name="IpBlockCacheService")
+    thread_target = _ip_block_cache_loop
+    if db_ready_signal is not None:
+        thread_target = lambda: _wait_for_db_ready_and_start(db_ready_signal)
+    thread = threading.Thread(target=thread_target, daemon=True, name="IpBlockCacheService")
     thread.start()

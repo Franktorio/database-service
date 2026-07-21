@@ -5,6 +5,7 @@ import fastapi
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from typing import Any
 
 from config.loader import API_ENABLED, API_PORT
 from src.api.system.api_db_endpoints import routes as api_db_routes
@@ -23,6 +24,8 @@ from src.services.logging import log_message
 
 PRINT_PREFIX = "API APP"
 
+_DB_READY_SIGNAL: Any = None
+
 TEST_DEFAULTS = {
     "expiration_minutes": 10,  # Token valid for 10 minutes; only for testing purposes
 }
@@ -31,6 +34,9 @@ TEST_DEFAULTS = {
 async def lifespan(app: fastapi.FastAPI):
     log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan startup started.")
     await init_db()
+    if _DB_READY_SIGNAL is not None:
+        _DB_READY_SIGNAL.set_ready()
+        log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal set to ready.")
     log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan startup complete.")
 
     yield # Application waits here while running, then resumes after shutdown.
@@ -43,8 +49,10 @@ app = fastapi.FastAPI(
 app.include_router(api_db_routes.router)
 app.include_router(user_db_routes.router)
 
-def start_api_server():
+def start_api_server(db_ready_signal=None):
     """Start the API server using Uvicorn."""
+    global _DB_READY_SIGNAL
+    _DB_READY_SIGNAL = db_ready_signal
     if not API_ENABLED:
         log_message(f"[INFO] [{PRINT_PREFIX}] API server is disabled in the configuration.")
         return
