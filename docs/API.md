@@ -175,7 +175,7 @@ Request body:
   "api_key": "super-admin-api-key",
   "username": "alice",
   "password": "change-me-please",
-  "role": "admin",
+  "initial_role": "admin",
   "email": "alice@example.com",
   "login_rate_limit": 12
 }
@@ -262,5 +262,5 @@ Request body:
 ## Known Gaps
 
 - API-key and cookie ratelimits are process-local.
-- The cookie login endpoint and cookie refresh path currently use different cookie settings.
+- Secret-bearing GET admin endpoints still accept `api_key` via query parameters instead of an authorization header.
 - Persistent logging occurs on auth success and failure paths, which adds DB dependency to control-plane traffic.

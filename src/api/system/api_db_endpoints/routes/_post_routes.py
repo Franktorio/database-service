@@ -70,7 +70,7 @@ async def update_key(request: Request, model: ApiKeyUpdateRequest):
     if updated_api_key is None:
         raise HTTPException(status_code=404, detail=f"API key '{model.key_hash}' not found.")
     
-    refresh_ratelimiter(updated_api_key.key_hash, updated_api_key)
+    refresh_ratelimiter(updated_api_key)
     
     return {
         "message": "API key updated successfully.",

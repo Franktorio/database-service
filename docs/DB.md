@@ -11,7 +11,7 @@ Current startup behavior:
 - Creates any missing tables with `Base.metadata.create_all`.
 - Creates any declared SQLAlchemy indexes with `checkfirst=True` so existing databases can pick up missing indexes without a full rebuild.
 - Uses an async SQLAlchemy engine with `NullPool`.
-- Keeps `echo=True` enabled in the engine.
+- Enables SQL echo only in development mode.
 
 ## Current Tables
 

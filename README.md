@@ -70,7 +70,6 @@ Create `config/.env` and set at minimum:
 - `PASSWORD_PEPPER`
 - `JWT_SECRET`
 - `JWT_ALGORITHM`
-- `JWT_COOKIE_NAME`
 - `JWT_EXP_MINUTES`
 
 Also supported:
@@ -205,10 +204,9 @@ These are current design realities, not aspirational behavior:
 
 - Ratelimits and IP blocks are process-local, not shared across instances.
 - Background services are daemon threads rather than supervised workers.
-- SQL echo is enabled in the DB engine by default.
+- SQL echo is enabled only in development mode.
 - The DB engine uses `NullPool`, which limits connection reuse.
-- Cookie login and cookie refresh paths currently use inconsistent cookie settings.
-- The healthcheck/restore path should be reviewed before production use.
+- Healthcheck/restore still requires production hardening before enabling automatic recovery.
 
 ## Documentation
 
