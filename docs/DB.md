@@ -1,133 +1,304 @@
-# Database Reference
+# Database Report
 
-The database layer is still small, but it is no longer limited to API keys. The live schema contains four system tables and several operational assumptions that matter for performance and maintenance.
+This document is a technical reference plus an operational audit of the current database layer. It reflects the live implementation, not just intended architecture.
 
-## Schema Initialization
+## Report Metadata
 
-`src/models/database.py` initializes schema directly from SQLAlchemy metadata during API startup.
+- Date: 2026-07-21
+- Scope: schema, initialization flow, CRUD behavior, services touching DB, migration and backup tooling
+- Basis: current main branch at HEAD in this workspace
+- Method: static code review across model, CRUD, security, service, and script layers
 
-Current startup behavior:
+## Database Runtime Architecture
 
-- Creates any missing tables with `Base.metadata.create_all`.
-- Creates any declared SQLAlchemy indexes with `checkfirst=True` so existing databases can pick up missing indexes without a full rebuild.
-- Uses an async SQLAlchemy engine with `NullPool`.
-- Enables SQL echo only in development mode.
+Database runtime is implemented with async SQLAlchemy over asyncpg.
+
+Current behavior in practice:
+
+- Engine is created once in src/models/database.py with postgresql+asyncpg.
+- Connection pooling uses NullPool, so every session checkout opens a fresh DB connection and closes on return.
+- Session factory is async_sessionmaker with expire_on_commit=False.
+- SQL echo is enabled only when OPERATING_MODE is development.
+- Schema bootstrap is metadata-driven (no migration framework in the request path).
+
+Operational implications:
+
+- NullPool simplifies lifecycle and avoids stale pooled sockets, but increases connection churn under load.
+- With frequent short DB operations (auth checks, persistent logging), per-request connect/disconnect overhead is non-trivial.
+- Because expire_on_commit=False, ORM instances remain usable after commit without implicit refresh. This improves endpoint ergonomics, but stale-field assumptions can slip into multi-step flows if code reuses old objects.
+
+## Startup and DB Readiness Sequencing
+
+The startup design now uses a readiness gate.
+
+Observed sequence:
+
+- main.py creates a DBReadySignal and starts background services with that signal.
+- Service threads (backup, healthcheck, cookie-expiry, and cache-cleaners) block in a wait loop until signal.is_ready() is true.
+- API server starts via Uvicorn.
+- FastAPI lifespan startup calls init_db(), then sets DBReadySignal ready.
+
+What this fixes:
+
+- Background loops no longer race DB initialization at process startup.
+
+Residual caveat:
+
+- DBReadySignal is in-process memory only. This is correct for single-process operation but not meaningful across multiple worker processes or hosts.
+
+## Schema Initialization Semantics
+
+Schema initialization is performed by init_db in src/models/database.py.
+
+Detailed behavior:
+
+- Base.metadata.create_all runs during API lifespan startup.
+- After table creation, code iterates all declared table.indexes and calls create(checkfirst=True).
+
+Why this matters:
+
+- New declared indexes can be added to existing deployments without dropping/recreating tables.
+- checkfirst=True avoids duplicate-index failures on already converged databases.
+
+Nitpicky notes:
+
+- create_all is additive and non-destructive; it does not handle column renames, type rewrites, constraint rewrites, or data backfills.
+- There is no schema version table or migration history ledger.
+- init_db currently logs a debug message that reads as if echo is enabled, even though echo is conditional by operating mode.
 
 ## Current Tables
 
-### `users`
+### users
 
 Purpose:
 
-- Stores login identities and password-hash metadata.
-- Stores role membership and per-user login rate limit.
+- Stores local identity data for password authentication.
+- Stores role list and per-user password login rate-limit configuration.
 
-Key columns:
+Key fields and defaults:
 
-- `id` primary key
-- `username` unique
-- `password_hash`
-- `password_salt`
-- `hash_iterations`
-- `hash_algorithm`
-- `email`
-- `roles` as `ARRAY(String)`
-- `login_rate_limit`
-- `created_at`
-- `last_updated_at`
+- id: integer PK.
+- username: unique, non-null.
+- password_hash: non-null.
+- password_salt: non-null, default empty string.
+- hash_iterations: non-null, default 210000.
+- hash_algorithm: non-null, default pbkdf2_sha256.
+- email: nullable, default empty string.
+- login_rate_limit: non-null, default 10.
+- roles: ARRAY(String), non-null, default empty list.
+- created_at: timezone-aware server_default now().
+- last_updated_at: timezone-aware server_default now(), onupdate now().
 
-Index coverage:
+Index and constraint posture:
 
-- Unique constraint on `username` provides the critical lookup index.
+- Unique index/constraint on username is the principal lookup accelerator.
 
-### `api_keys`
+Design caveats:
 
-Purpose:
+- roles uses PostgreSQL ARRAY and is therefore intentionally Postgres-specific.
+- password_salt default empty string is safe only if every create/update path always supplies a real salt (current user-create path does, but DB-level default still allows bad rows from out-of-band SQL writes).
 
-- Stores hashed API keys plus permission and rate-limit settings.
-
-Key columns:
-
-- `id` primary key
-- `key_hash` unique
-- `permission_level`
-- `rate_limit`
-- `email`
-- `created_at`
-- `last_updated_at`
-
-Index coverage:
-
-- Unique constraint on `key_hash`.
-- Explicit index on `created_at` to support ordered listing.
-
-### `auth_cookies`
+### api_keys
 
 Purpose:
 
-- Stores hashed cookie JWT identifiers for revocation and expiry checks.
+- Stores hashed API key identities and policy attributes used by API auth.
 
-Key columns:
+Key fields and defaults:
 
-- `id` primary key
-- `token_hash` unique
-- `username`
-- `expires_at`
-- `revoked`
-- `created_at`
+- id: integer PK.
+- key_hash: unique, non-null.
+- permission_level: non-null, default 0.
+- rate_limit: non-null, default 1000.
+- email: nullable, default empty string.
+- created_at: timezone-aware server_default now(), indexed.
+- last_updated_at: timezone-aware server_default now(), onupdate now().
 
-Index coverage:
+Index and query alignment:
 
-- Unique constraint on `token_hash`.
-- Explicit index on `username` for user-scoped session invalidation.
-- Explicit composite index on `(expires_at, revoked)` for expiry sweeps.
+- Unique key_hash serves key lookup on auth cache miss.
+- created_at index aligns with list endpoint ordering by created_at.
 
-Notes:
-
-- `username` is not a foreign key to `users`; integrity is enforced in application code only.
-
-### `persistent_logs`
+### auth_cookies
 
 Purpose:
 
-- Stores auth, rate-limit, and IP-block events for persistent audit visibility.
+- Stores hashed JWT cookie identities for revocation checks and expiration maintenance.
 
-Key columns:
+Key fields:
 
-- `id` primary key
-- `log_type`
-- `log_level`
-- `message`
-- `ip_address`
-- `created_at`
+- id: integer PK.
+- token_hash: unique, non-null.
+- username: non-null, indexed.
+- expires_at: timezone-aware, non-null.
+- revoked: non-null boolean, default false.
+- created_at: timezone-aware server_default now().
 
-Index coverage:
+Indexes:
 
-- Explicit index on `created_at` for recent-log retrieval and age-based deletion.
+- Unique token_hash.
+- Single-column username index.
+- Composite index on expires_at, revoked.
 
-## CRUD Conventions
+Design caveats:
 
-System CRUD modules generally follow this pattern:
+- username is not declared as a foreign key to users.username.
+- Referential integrity is therefore application-enforced, not database-enforced.
+- Inconsistency windows are possible during partial failures or manual SQL manipulation.
 
-- Accept optional `session: AsyncSession | None = None`.
-- If no session is passed, open `SessionLocal()` internally.
-- Track whether the function owns the session and close it only in that case.
+### persistent_logs
 
-That pattern is useful for composition, but some multi-step flows still commit intermediate side effects before the broader logical operation is finished.
+Purpose:
+
+- Stores authentication, rate-limit, and IP-block events for persistent observability.
+
+Key fields:
+
+- id: integer PK.
+- log_type: non-null string in DB (typed as Literal in Python).
+- log_level: non-null string in DB (typed as Literal in Python).
+- message: non-null.
+- ip_address: nullable.
+- created_at: timezone-aware server_default now().
+
+Indexes:
+
+- created_at index for recent-first reads and age-based cleanup.
+
+Design caveats:
+
+- Python Literal hints do not create DB constraints; DB accepts any string unless external constraints are added.
+- This is acceptable for internal-write-only paths, but strict audit pipelines often require ENUM/check constraints.
+
+## CRUD and Transaction Conventions
+
+Shared pattern across system CRUD modules:
+
+- Each function accepts optional session: AsyncSession | None.
+- If no session is passed, function creates SessionLocal and self-closes it.
+- Most functions commit internally.
+
+Strengths:
+
+- Easy call sites and low boilerplate for single-operation requests.
+- Explicit session injection allows composition where needed.
+
+Important transactional caveat:
+
+- Several helper functions commit even when participating in broader flows via shared session.
+- Example: user update and user delete call delete_auth_cookies_by_username, which commits before subsequent user-row mutation/deletion.
+- Consequence: operations that appear logically atomic can become split into multiple commit boundaries.
+
+Why this is nitpicky but important:
+
+- If a downstream step fails after an earlier helper commit, side effects may remain partially applied.
+- For strict consistency semantics, compose with outer transaction control and avoid inner helper commits.
+
+## Database Access Patterns in Security Paths
+
+The auth stack is DB-coupled in specific places:
+
+- API key auth:
+	- Cache miss reads api_keys by key_hash.
+	- Success and failure paths write persistent_logs (best effort).
+	- Rate-limit metadata is cached in memory after first lookup.
+- Password auth:
+	- Reads users by username.
+	- Writes persistent_logs for success/failure/rate-limit outcomes.
+	- User-specific password ratelimits are cached in memory.
+- Cookie issuance:
+	- New JWT hash is persisted in auth_cookies.
+
+Operational implication:
+
+- Persistent logging increases write volume on control-plane paths by design.
+- This improves auditability but can amplify DB dependency during auth bursts.
+
+## Background Services Touching the Database
+
+### Cookie Expiry Service
+
+- Periodically revokes expired auth_cookies rows.
+- Uses a service-owned async session per sweep.
+- Sweep interval is configurable in service_config.json.
+
+### DB Healthcheck Service
+
+- Runs SELECT 1 via SessionLocal.
+- Tracks consecutive failures with leniency threshold.
+- Can auto-rollover by restoring from latest backup when configured.
+
+Recovery behavior details:
+
+- Backup file zero-size check is present before restore.
+- Failed restored backups can be quarantined into backups/bad_backups.
+- Restore attempts are bounded by max_restore_attempts.
+
+Risk notes:
+
+- restore_from_backup drops and recreates the active DB before replay.
+- No cryptographic integrity check or SQL sanity validation of backup contents is performed before destructive restore actions.
+
+### Backup Service
+
+- Uses pg_dump to write timestamped SQL files.
+- Keeps only retention newest files.
+- Uses readiness gate before entering loop.
+
+Operational caveat:
+
+- Backup success is based on subprocess return code; no replay verification is performed at backup creation time.
 
 ## Migration Behavior
 
-`scripts/migrate_db.py` creates a temporary database from current metadata, copies rows from common tables using exact column/type matches, then swaps database names.
+scripts/migrate_db.py implements a copy-and-swap migration strategy.
 
-Important caveats:
+Workflow:
 
-- Renamed or type-changed columns are skipped rather than failing hard.
-- Sequence reset behavior is not currently documented or enforced after explicit ID copy.
-- This script is better described as a compatibility copy-and-swap than a full migration framework.
+- Create temporary database.
+- Materialize latest metadata schema in temp DB.
+- For common table names between source and temp, copy rows using only exactly compatible columns by name and type.
+- Rename original DB to backup name.
+- Rename temp DB to production DB name.
 
-## Operational Notes
+Technical caveats:
 
-- The service is currently single-node oriented.
-- In-memory auth/ratelimit state is not stored in PostgreSQL.
-- Persistent logs add write traffic on authentication code paths.
-- Backups are plain SQL dumps written to local disk.
+- Column rename/type-change scenarios do not fail migration by default; incompatible fields are silently excluded from copy set.
+- Sequence state reconciliation is not explicitly reset after ID copy.
+- Data transforms are not represented; this is structural compatibility copy, not declarative migration semantics.
+- Old database is retained with timestamped suffix, increasing rollback options but also requiring lifecycle cleanup policy.
+
+## Configuration and Connectivity Notes
+
+- Connection URL is built by direct string interpolation in config/loader.py.
+- Credentials are not URL-encoded before DSN assembly.
+
+Why this matters:
+
+- Special characters in username/password can break DSN parsing unless encoded.
+
+## Capacity and Scaling Characteristics
+
+Current DB design assumptions are single-node and moderate load:
+
+- In-memory ratelimiter and block caches are process-local.
+- NullPool favors correctness simplicity over high-throughput connection reuse.
+- Auth paths include both read and write DB activity (especially with persistent logs enabled).
+
+Scaling caveat:
+
+- Multiple app instances will not share in-memory limiter state unless moved to an external shared store.
+
+## High-Value Hardening Backlog
+
+1. Add strict transaction-boundary policy for CRUD composition.
+2. Introduce migration tooling with explicit revisions and up/down semantics.
+3. Add sequence reconciliation step to migration script.
+4. Add pre-restore backup validation beyond size checks.
+5. Encode DB credentials safely when constructing DATABASE_URL.
+6. Consider selective pooling strategy for production throughput.
+7. Add DB-level constraints for persistent_logs type/level if strict audit taxonomy is required.
+
+## Bottom Line
+
+The database layer is clear and maintainable for a compact service, and startup sequencing is materially improved by DB readiness gating. The most important remaining gaps are not table-count complexity but operational rigor: transaction atomicity discipline, migration determinism, and restore safety guarantees under failure conditions.
