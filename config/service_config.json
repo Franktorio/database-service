@@ -10,7 +10,7 @@
     "dbhealthchecker":
     {
         "enabled": true,
-        "auto_rollover": true,
+        "auto_rollover": false,
         "shutdown_on_failure": true,
         "leniency": 3,
         "interval": 60,

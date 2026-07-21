@@ -3,6 +3,7 @@ import os
 import signal
 import threading
 import subprocess
+import asyncio
 import time
 import pathlib
 import json
@@ -12,7 +13,9 @@ from config.loader import (
     POSTGRESQL_PASSWORD,
     POSTGRESQL_HOST,
     POSTGRESQL_PORT,
+    AsyncSessionLocal,
 )
+from sqlalchemy import text
 from src.services.logging import log_message
 
 PRINT_PREFIX = "DBHEALTHCHECK"
@@ -32,33 +35,8 @@ BACKUP_DIR = pathlib.Path(
     LOCALCONFIG.get("backup_dir", "backups")
 )
 
-def _check_database_health():
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Performing database health check using pg_isready.")
-    command = [
-        "pg_isready",
-        "-U", POSTGRESQL_USERNAME,
-        "-h", POSTGRESQL_HOST,
-        "-p", POSTGRESQL_PORT,
-        "-d", POSTGRESQL_DATABASE_NAME
-    ]
 
-    try:
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=HEALTHCHECK_SUBPROCESS_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        log_message(
-            f"[ERROR] [{PRINT_PREFIX}] Healthcheck command timed out after {HEALTHCHECK_SUBPROCESS_TIMEOUT_SECONDS}s."
-        )
-        return False
-
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Healthcheck command exit code: {result.returncode}. Next check will be in {INTERVAL} seconds.")
-    return result.returncode == 0
-
-def _get_last_backup():
+def get_last_backup():
     backups = list(BACKUP_DIR.glob("backup_*.sql"))
 
     if not backups:
@@ -70,6 +48,18 @@ def _get_last_backup():
     )
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Latest backup selected: {latest_backup.name}")
     return latest_backup
+
+async def database_query_check():
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        return True
+
+    except Exception as exc:
+        log_message(
+            f"[ERROR] [{PRINT_PREFIX}] Database query failed: {exc}"
+        )
+        return False
     
 def restore_from_backup(backup_file):
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting restore from backup file: {backup_file}")
@@ -81,68 +71,92 @@ def restore_from_backup(backup_file):
         "-d", POSTGRESQL_DATABASE_NAME,
         "-f", str(backup_file)
     ]
-
+    subprocess.run(
+        command,
+        check=True,
+        timeout=RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
+        env={
+            **os.environ,
+            "PGPASSWORD": POSTGRESQL_PASSWORD,
+        },
+    )
+    
+def remove_bad_backup(backup_file):
+    """Moves a backup file to a 'bad_backups' directory for further inspection."""
+    bad_backups_dir = BACKUP_DIR / "bad_backups"
+    bad_backups_dir.mkdir(exist_ok=True)
+    destination = bad_backups_dir / backup_file.name
     try:
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env={**os.environ, "PGPASSWORD": POSTGRESQL_PASSWORD},
-            timeout=RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        log_message(
-            f"[ERROR] [{PRINT_PREFIX}] Restore command timed out after {RESTORE_SUBPROCESS_TIMEOUT_SECONDS}s."
-        )
-        return False
+        backup_file.rename(destination)
+        log_message(f"[INFO] [{PRINT_PREFIX}] Moved bad backup file to: {destination}")
+    except Exception as exc:
+        log_message(f"[ERROR] [{PRINT_PREFIX}] Failed to move bad backup file {backup_file} to {destination}: {exc}")
 
-    if result.returncode != 0:
-        log_message(f"[ERROR] [{PRINT_PREFIX}] Restore failed: {result.stderr.decode()}")
-        return False
-    log_message(f"[INFO] [{PRINT_PREFIX}] Restore completed successfully.")
-    return True
+def healthcheck_service():
+    _healthy = True
+    _restore_attempted = False
 
 
-def _shutdown_process(exit_code: int) -> None:
-    log_message(f"[INFO] [{PRINT_PREFIX}] Shutting down process with exit code {exit_code}.")
-    os.kill(os.getpid(), signal.SIGTERM)
-        
-def healthcheck_loop():
+    log_message(f"[INFO] [{PRINT_PREFIX}] Starting database healthcheck service with interval {INTERVAL} seconds.")
     failure_count = 0
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Healthcheck loop started with interval={INTERVAL}s and leniency={LENIENCY}.")
 
     while True:
-        if not _check_database_health():
-            failure_count += 1
-            log_message(f"[WARNING] [{PRINT_PREFIX}] Database health check failed ({failure_count}/{LENIENCY})")
-            
-            if failure_count >= LENIENCY:
-                log_message(f"[ERROR] [{PRINT_PREFIX}] Database is unhealthy.")
-                
-                if AUTO_ROLLOVER:
-                    last_backup = _get_last_backup()
-                    if last_backup:
-                        log_message(f"[INFO] [{PRINT_PREFIX}] Restoring from backup: {last_backup}")
-                        restore_from_backup(last_backup)
-                    else:
-                        log_message(f"[ERROR] [{PRINT_PREFIX}] No backups available for restoration.")
-                else:
-                    log_message(f"[INFO] [{PRINT_PREFIX}] Auto-rollover is disabled. No restoration will be performed.")
-                
-                if SHUTDOWN_ON_FAILURE:
-                    _shutdown_process(1)
-        else:
-            if failure_count > 0:
-                log_message(f"[INFO] [{PRINT_PREFIX}] Database health recovered; resetting failure counter.")
-            failure_count = 0  # Reset on success
+        time.sleep((INTERVAL))
+        try:
+            check = asyncio.run(
+            asyncio.wait_for(
+                database_query_check(),
+                timeout=HEALTHCHECK_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        )
+        except Exception as exc:
+            log_message(f"[ERROR] [{PRINT_PREFIX}] Exception during database healthcheck: {exc}")
+            check = False
 
-        time.sleep(INTERVAL)
-        
+        if not check:
+            if _healthy:
+                log_message(f"[WARNING] [{PRINT_PREFIX}] Database healthcheck just failed. Starting failure count.")
+            else:
+                log_message(f"[WARNING] [{PRINT_PREFIX}] Database healthcheck still failing. Failure count: {failure_count + 1}/{LENIENCY}")
+            _healthy = False
+            failure_count += 1
+        else:
+            if not _healthy:
+                log_message(f"[INFO] [{PRINT_PREFIX}] Database healthcheck recovered. Resetting failure count.")
+            _healthy = True
+            _restore_attempted = False
+            failure_count = 0
+
+        if failure_count >= LENIENCY:
+
+            if SHUTDOWN_ON_FAILURE:
+                log_message(f"[CRITICAL] [{PRINT_PREFIX}] Maximum failure count reached. Shutting down.")
+                os.kill(os.getpid(), signal.SIGINT)
+            else:
+                log_message(f"[ERROR] [{PRINT_PREFIX}] Maximum failure count reached. Auto-rollover is {'enabled' if AUTO_ROLLOVER else 'disabled'}.")
+                if AUTO_ROLLOVER and not _restore_attempted:
+                    try:
+                        latest_backup = get_last_backup()
+                        if latest_backup:
+                            if latest_backup.stat().st_size == 0:
+                                log_message(f"[ERROR] [{PRINT_PREFIX}] Latest backup file is empty. Cannot restore.")
+                                remove_bad_backup(latest_backup)
+                                continue
+                            _restore_attempted = True
+                            restore_from_backup(latest_backup)
+                            
+                        else:
+                            log_message(f"[ERROR] [{PRINT_PREFIX}] No backup found for auto-rollover.")
+                    except Exception as exc:
+                        log_message(f"[ERROR] [{PRINT_PREFIX}] Exception during auto-rollover: {exc}")
+                        log_message(f"[ERROR] [{PRINT_PREFIX}] Auto-rollover failed. Shutting down.")
+                        os.kill(os.getpid(), signal.SIGINT)
+
 def start_healthcheck_service():
-    if HEALTHCHECK_ENABLED:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Starting database health check service...")
-        healthcheck_thread = threading.Thread(target=healthcheck_loop, daemon=True)
-        healthcheck_thread.start()
-        log_message(f"[DEBUG] [{PRINT_PREFIX}] Healthcheck thread started as daemon.")
-    else:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Database health check service is disabled.")
+    if not HEALTHCHECK_ENABLED:
+        log_message(f"[INFO] [{PRINT_PREFIX}] Healthcheck service is disabled in configuration.")
+        return
+    
+    log_message(f"[INFO] [{PRINT_PREFIX}] Starting database healthcheck service...")
+    thread = threading.Thread(target=healthcheck_service, daemon=True, name="DBHealthCheckService")
+    thread.start()
