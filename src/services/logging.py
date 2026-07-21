@@ -65,6 +65,11 @@ def initialize_logging() -> None:
 def log_message(*args: Any, **kwargs: Any) -> None:
     """Log a message with print-like call style."""
     message = " ".join(str(arg) for arg in args)
+    
+    if not _worker_started:
+        print(f"[WARNING] [{PRINT_PREFIX}] Logging worker not started. Message will be printed directly:")
+        print(message)
+        return
 
     if not message:
         return

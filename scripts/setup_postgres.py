@@ -197,7 +197,7 @@ def _create_or_update_role(role_name: str, role_password: str) -> None:
 				"-v",
 				"ON_ERROR_STOP=1",
 				"-c",
-				f"ALTER ROLE {role_ident} WITH LOGIN PASSWORD {password_literal}",
+				f"ALTER ROLE {role_ident} WITH LOGIN CREATEDB PASSWORD {password_literal}",
 			]
 		)
 		return
@@ -212,7 +212,7 @@ def _create_or_update_role(role_name: str, role_password: str) -> None:
 			"-v",
 			"ON_ERROR_STOP=1",
 			"-c",
-			f"CREATE ROLE {role_ident} WITH LOGIN PASSWORD {password_literal}",
+			f"CREATE ROLE {role_ident} WITH LOGIN CREATEDB PASSWORD {password_literal}",
 		]
 	)
 	log_message(f"[INFO] [{PRINT_PREFIX}] Created role '{role_name}'.")

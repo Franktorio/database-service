@@ -63,25 +63,97 @@ async def database_query_check():
         )
         return False
     
-def restore_from_backup(backup_file):
-    log_message(f"[INFO] [{PRINT_PREFIX}] Starting restore from backup file: {backup_file}")
-    command = [
+def drop_database():
+    log_message(f"[INFO] [{PRINT_PREFIX}] Dropping database '{POSTGRESQL_DATABASE_NAME}'...")
+
+    terminate_command = [
         "psql",
         "-U", POSTGRESQL_USERNAME,
         "-h", POSTGRESQL_HOST,
-        "-p", POSTGRESQL_PORT,
-        "-d", POSTGRESQL_DATABASE_NAME,
-        "-f", str(backup_file)
+        "-p", str(POSTGRESQL_PORT),
+        "-d", "postgres",
+        "-c", # Command terminates all active connections to the target database before dropping it
+        f"""
+        SELECT pg_terminate_backend(pid)
+        FROM pg_stat_activity
+        WHERE datname = '{POSTGRESQL_DATABASE_NAME}'
+        AND pid <> pg_backend_pid();
+        """
     ]
+
+    subprocess.run(
+        terminate_command,
+        check=True,
+        timeout=RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
+        env={**os.environ, "PGPASSWORD": POSTGRESQL_PASSWORD},
+    )
+
+    drop_command = [
+        "psql",
+        "-U", POSTGRESQL_USERNAME,    # -U = username
+        "-h", POSTGRESQL_HOST,        # -h = host
+        "-p", str(POSTGRESQL_PORT),   # -p = port
+        "-d", "postgres",             # -d = database to connect to (postgres is the default maintenance DB)
+        "-c",
+        f'DROP DATABASE IF EXISTS "{POSTGRESQL_DATABASE_NAME}";'
+    ]
+
+    subprocess.run(
+        drop_command,
+        check=True,
+        timeout=RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
+        env={**os.environ, "PGPASSWORD": POSTGRESQL_PASSWORD},
+    )
+
+
+def create_database():
+    log_message(f"[INFO] [{PRINT_PREFIX}] Creating database '{POSTGRESQL_DATABASE_NAME}'...")
+
+    command = [
+        "psql",
+        "-U", POSTGRESQL_USERNAME,    # -U = username
+        "-h", POSTGRESQL_HOST,        # -h = host
+        "-p", str(POSTGRESQL_PORT),   # -p = port
+        "-d", "postgres",             # -d = database to connect to (postgres is the default maintenance DB)
+        "-c",                         # -c = command to execute
+        f'CREATE DATABASE "{POSTGRESQL_DATABASE_NAME}";'
+    ]
+
     subprocess.run(
         command,
         check=True,
         timeout=RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
-        env={
-            **os.environ,
-            "PGPASSWORD": POSTGRESQL_PASSWORD,
-        },
+        env={**os.environ, "PGPASSWORD": POSTGRESQL_PASSWORD},
     )
+
+
+def restore_from_backup(backup_file):
+    log_message(f"[INFO] [{PRINT_PREFIX}] Starting restore from backup file: {backup_file}")
+    
+
+    drop_database()
+    create_database()
+
+    command = [
+        "psql",
+        "-U", POSTGRESQL_USERNAME,
+        "-h", POSTGRESQL_HOST,
+        "-p", str(POSTGRESQL_PORT),
+        "-d", POSTGRESQL_DATABASE_NAME,
+        "-f", str(backup_file)
+    ]
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            timeout=RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
+            env={**os.environ, "PGPASSWORD": POSTGRESQL_PASSWORD},
+        )
+    except Exception as exc:
+        log_message(f"[ERROR] [{PRINT_PREFIX}] Restore from backup failed: {exc}")
+        raise
+
+    log_message(f"[INFO] [{PRINT_PREFIX}] Restore completed successfully.")
     
 def remove_bad_backup(backup_file):
     """Moves a backup file to a 'bad_backups' directory for further inspection."""
