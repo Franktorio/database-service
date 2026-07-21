@@ -7,16 +7,17 @@
         "backup_dir": "backups",
         "subprocess_timeout_seconds": 30
     },
-    "dbhealthchecker":
-    {
+    "dbhealthchecker": {
         "enabled": true,
-        "auto_rollover": false,
+        "auto_rollover": true,
         "shutdown_on_failure": true,
         "leniency": 3,
         "interval": 60,
-        "backup_dir": "backups",
+        "reparations_interval": 5,
         "healthcheck_timeout_seconds": 30,
-        "restore_subprocess_timeout_seconds": 30
+        "restore_subprocess_timeout_seconds": 30,
+        "max_restore_attempts": 3,
+        "backup_dir": "backups"
     },
     "setup_postgres":
     {

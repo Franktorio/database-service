@@ -29,8 +29,10 @@ AUTO_ROLLOVER = LOCALCONFIG.get("auto_rollover", True)
 SHUTDOWN_ON_FAILURE = LOCALCONFIG.get("shutdown_on_failure", True)
 LENIENCY = LOCALCONFIG.get("leniency", 5)
 INTERVAL = LOCALCONFIG.get("interval", 60)
+REPARATIONS_INTERVAL = LOCALCONFIG.get("reparations_interval", 5) # if auto_rollover is enabled, this is the interval to wait before attempting to restore from backup
 HEALTHCHECK_TIMEOUT_SECONDS = LOCALCONFIG.get("healthcheck_timeout_seconds", 30)
 RESTORE_SUBPROCESS_TIMEOUT_SECONDS = LOCALCONFIG.get("restore_subprocess_timeout_seconds", 30)
+MAX_RESTORE_ATTEMPTS = LOCALCONFIG.get("max_restore_attempts", 3)
 BACKUP_DIR = pathlib.Path(
     LOCALCONFIG.get("backup_dir", "backups")
 )
@@ -91,17 +93,22 @@ def remove_bad_backup(backup_file):
         log_message(f"[INFO] [{PRINT_PREFIX}] Moved bad backup file to: {destination}")
     except Exception as exc:
         log_message(f"[ERROR] [{PRINT_PREFIX}] Failed to move bad backup file {backup_file} to {destination}: {exc}")
+        raise # Re-raise the exception to ensure the calling function is aware of the failure
 
 def healthcheck_service():
     _healthy = True
     _restore_attempted = False
-
+    _last_restored_backup: pathlib.Path = None
+    _restore_attempts = 0
 
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting database healthcheck service with interval {INTERVAL} seconds.")
     failure_count = 0
 
     while True:
-        time.sleep((INTERVAL))
+        if _restore_attempted and _last_restored_backup:
+            time.sleep(REPARATIONS_INTERVAL)
+        else:
+            time.sleep(INTERVAL)
         try:
             check = asyncio.run(
                 asyncio.wait_for(
@@ -125,32 +132,66 @@ def healthcheck_service():
                 log_message(f"[INFO] [{PRINT_PREFIX}] Database healthcheck recovered. Resetting failure count.")
             _healthy = True
             _restore_attempted = False
+            _restore_attempts = 0
             failure_count = 0
 
         if failure_count >= LENIENCY:
+            log_message(
+                f"[ERROR] [{PRINT_PREFIX}] Maximum failure count reached. "
+                f"Auto-rollover is {'enabled' if AUTO_ROLLOVER else 'disabled'}."
+            )
 
-            if SHUTDOWN_ON_FAILURE:
-                log_message(f"[CRITICAL] [{PRINT_PREFIX}] Maximum failure count reached. Shutting down.")
-                os.kill(os.getpid(), signal.SIGINT)
-            else:
-                log_message(f"[ERROR] [{PRINT_PREFIX}] Maximum failure count reached. Auto-rollover is {'enabled' if AUTO_ROLLOVER else 'disabled'}.")
-                if AUTO_ROLLOVER and not _restore_attempted:
+            if AUTO_ROLLOVER:
+                if not _restore_attempted:
                     try:
                         latest_backup = get_last_backup()
+
                         if latest_backup:
                             if latest_backup.stat().st_size == 0:
                                 log_message(f"[ERROR] [{PRINT_PREFIX}] Latest backup file is empty. Cannot restore.")
                                 remove_bad_backup(latest_backup)
                                 continue
+
                             _restore_attempted = True
+                            _last_restored_backup = latest_backup
                             restore_from_backup(latest_backup)
-                            
+                            failure_count = 0
+                            log_message(f"[INFO] [{PRINT_PREFIX}] Auto-rollover completed successfully.")
+
                         else:
-                            log_message(f"[ERROR] [{PRINT_PREFIX}] No backup found for auto-rollover.")
+                            log_message(f"[ERROR] [{PRINT_PREFIX}] No backup found for auto-rollover, shutting down.")
+                            os.kill(os.getpid(), signal.SIGINT)
+
                     except Exception as exc:
                         log_message(f"[ERROR] [{PRINT_PREFIX}] Exception during auto-rollover: {exc}")
-                        log_message(f"[ERROR] [{PRINT_PREFIX}] Auto-rollover failed. Shutting down.")
+                        log_message(f"[CRITICAL] [{PRINT_PREFIX}] Auto-rollover failed. Shutting down.")
                         os.kill(os.getpid(), signal.SIGINT)
+                else:
+                    try:
+                        remove_bad_backup(_last_restored_backup)
+                    except Exception as exc:
+                        log_message(f"[ERROR] [{PRINT_PREFIX}] Failed to quarantine bad backup {_last_restored_backup}: {exc}")
+                        log_message(f"[CRITICAL] [{PRINT_PREFIX}] Auto-rollover already attempted and latest backup failed. Shutting down.")
+                        os.kill(os.getpid(), signal.SIGINT)
+                        continue
+                    log_message(f"[CRITICAL] [{PRINT_PREFIX}] Auto-rollover already attempted and latest backup failed.")
+                    log_message(f"[CRITICAL] [{PRINT_PREFIX}] Bad backup: {_last_restored_backup.name} (quarantined).")
+                    _restore_attempts += 1
+                    if _restore_attempts < MAX_RESTORE_ATTEMPTS:
+                        log_message(f"[INFO] [{PRINT_PREFIX}] Attempting to restore from the next latest backup. Attempt {_restore_attempts + 1}/{MAX_RESTORE_ATTEMPTS}.")
+                        _restore_attempted = False  # Reset to allow another restore attempt
+                        _last_restored_backup = None  # Reset to allow selection of the next latest backup
+                    else:
+                        log_message(f"[CRITICAL] [{PRINT_PREFIX}] Maximum restore attempts reached. Shutting down.")
+                        os.kill(os.getpid(), signal.SIGINT)
+                    
+                    
+
+            elif SHUTDOWN_ON_FAILURE:
+                log_message(
+                    f"[CRITICAL] [{PRINT_PREFIX}] Maximum failure count reached. Shutting down."
+                )
+                os.kill(os.getpid(), signal.SIGINT)
 
 def start_healthcheck_service():
     if not HEALTHCHECK_ENABLED:
