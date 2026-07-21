@@ -1,6 +1,8 @@
 # ~/src/services/logging.py
 # Centralized logging configuration for console + rotating file logs.
 
+import queue
+import threading
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -17,6 +19,8 @@ _BASE_DIR = Path(__file__).resolve().parents[2]
 _LOG_DIR = _BASE_DIR / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+_log_queue = queue.Queue(maxsize=10000)  # Limit the queue size to prevent excessive memory usage
+_worker_started = False
 
 def _build_logger() -> logging.Logger:
     logger = logging.getLogger("database_service")
@@ -51,29 +55,45 @@ def _build_logger() -> logging.Logger:
 
 
 def initialize_logging() -> None:
-    logger = _build_logger()
-    logger.info(f"[{PRINT_PREFIX}] Logging initialized. mode={OPERATING_MODE} debug={DEBUG_ENABLED}")
-
+    """Starts a worker thread that processes log messages from a queue."""
+    global _worker_started
+    if not _worker_started:
+        _worker_started = True
+        worker_thread = threading.Thread(target=_log_message_worker, daemon=True, name="LogMessageWorker")
+        worker_thread.start()
 
 def log_message(*args: Any, **kwargs: Any) -> None:
     """Log a message with print-like call style."""
-    logger = _build_logger()
     message = " ".join(str(arg) for arg in args)
+
     if not message:
         return
+    
+    try:
+        _log_queue.put_nowait(message)
+    except queue.Full:
+        pass
 
-    if message.startswith("[ERROR]"):
-        logger.error(message)
-        return
-    if message.startswith("[WARNING]"):
-        logger.warning(message)
-        return
-    if message.startswith("[DEBUG]"):
-        logger.debug(message)
-        return
+def _log_message_worker():
+    logger = _build_logger()
 
-    logger.info(message)
-
+    while True:
+        try:
+            message = _log_queue.get()
+            if message.startswith("[ERROR]"):
+                logger.error(message)
+            elif message.startswith("[WARNING]"):
+                logger.warning(message)
+            elif message.startswith("[DEBUG]"):
+                logger.debug(message)
+            elif message.startswith("[CRITICAL]"):
+                logger.critical(message)
+            else:
+                logger.info(message)
+        except Exception as e:
+            print(f"[CRITICAL] [{PRINT_PREFIX}] Logging worker error: {e}")
+        finally:
+            _log_queue.task_done()
 
 def clear_logs() -> None:
     """Clear the active log file while keeping handlers intact."""
