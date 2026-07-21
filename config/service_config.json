@@ -15,7 +15,7 @@
         "leniency": 3,
         "interval": 60,
         "backup_dir": "backups",
-        "healthcheck_subprocess_timeout_seconds": 30,
+        "healthcheck_timeout_seconds": 30,
         "restore_subprocess_timeout_seconds": 30
     },
     "setup_postgres":

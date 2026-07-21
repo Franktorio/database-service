@@ -29,7 +29,7 @@ AUTO_ROLLOVER = LOCALCONFIG.get("auto_rollover", True)
 SHUTDOWN_ON_FAILURE = LOCALCONFIG.get("shutdown_on_failure", True)
 LENIENCY = LOCALCONFIG.get("leniency", 5)
 INTERVAL = LOCALCONFIG.get("interval", 60)
-HEALTHCHECK_SUBPROCESS_TIMEOUT_SECONDS = LOCALCONFIG.get("healthcheck_subprocess_timeout_seconds", 30)
+HEALTHCHECK_TIMEOUT_SECONDS = LOCALCONFIG.get("healthcheck_timeout_seconds", 30)
 RESTORE_SUBPROCESS_TIMEOUT_SECONDS = LOCALCONFIG.get("restore_subprocess_timeout_seconds", 30)
 BACKUP_DIR = pathlib.Path(
     LOCALCONFIG.get("backup_dir", "backups")
@@ -104,11 +104,11 @@ def healthcheck_service():
         time.sleep((INTERVAL))
         try:
             check = asyncio.run(
-            asyncio.wait_for(
-                database_query_check(),
-                timeout=HEALTHCHECK_SUBPROCESS_TIMEOUT_SECONDS,
+                asyncio.wait_for(
+                    database_query_check(),
+                    timeout=HEALTHCHECK_TIMEOUT_SECONDS,
+                )
             )
-        )
         except Exception as exc:
             log_message(f"[ERROR] [{PRINT_PREFIX}] Exception during database healthcheck: {exc}")
             check = False
