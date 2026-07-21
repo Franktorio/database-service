@@ -46,15 +46,17 @@ def _place_in_ratelimiters(api_key: ApiKey) -> RateLimit:
     log_message(f"[DEBUG] [API VALIDATE] Placed API key {api_hash} in rate limiters with limit {api_key.rate_limit}.")
     return _ratelimiters[api_hash]
 
-def refresh_ratelimiter(api_key: ApiKey) -> RateLimit:
-    """Refresh the RateLimit instance for the given API key in the ratelimiters dictionary. Use when the API key's rate limit has changed in the database."""
-    api_hash = api_key.key_hash
-    limit = api_key.rate_limit
-    level = api_key.permission_level
-    current_time = time.time()
-    _ratelimiters[api_hash] = RateLimit(limit=limit, key_hash=api_hash, permission_level=level)
-    _last_seen_by_key[api_hash] = current_time
-    log_message(f"[DEBUG] [API VALIDATE] Refreshed API key {api_hash} in rate limiters with new limit {api_key.rate_limit}.")
+def refresh_ratelimiter(api_hash: str, api_object: ApiKey | None = None) -> RateLimit:
+    """
+    Refresh the RateLimit instance for the given API key in the ratelimiters dictionary. 
+    Use when the API key's rate limit has changed in the database. 
+    Does not check if the API key exists in the database; it assumes the caller has already verified that.
+    """
+    with _cache_lock:
+        if not api_object:
+            api_object = get_api_key(api_hash)
+        _place_in_ratelimiters(api_object)
+    log_message(f"[DEBUG] [API VALIDATE] Refreshed API key {api_hash} in rate limiters with new limit {api_object.rate_limit}.")
     return _ratelimiters[api_hash]
 
 def remove_ratelimiter(api_hash: str) -> bool:
