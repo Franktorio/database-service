@@ -2,16 +2,15 @@
 # Request models for API-key administration endpoints.
 
 from typing import Optional
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from src.api.config import VIEW_LEVEL, SUPER_ADMIN_LEVEL
-from src.api.models import APIRequestBase
 from src.services.logging import log_message
 
 PRINT_PREFIX = "API DB MODELS"
 
 
-class ApiKeyCreateRequest(APIRequestBase):
+class ApiKeyCreateRequest(BaseModel):
     """Request body for creating a new API key."""
 
     permission_level: int = Field(default=VIEW_LEVEL, ge=VIEW_LEVEL, le=SUPER_ADMIN_LEVEL, description="Permission level for the new API key.")
@@ -19,7 +18,7 @@ class ApiKeyCreateRequest(APIRequestBase):
     email: Optional[str] = Field(default=None, description="Optional email address associated with the API key.")
 
 
-class ApiKeyUpdateRequest(APIRequestBase):
+class ApiKeyUpdateRequest(BaseModel):
     """Request body for updating an existing API key."""
 
     key_hash: str = Field(..., description="Hash of the API key to update.")
@@ -28,7 +27,7 @@ class ApiKeyUpdateRequest(APIRequestBase):
     new_email: Optional[str] = Field(default=None, description="Optional replacement email associated with the API key.")
 
 
-class ApiKeyDeleteRequest(APIRequestBase):
+class ApiKeyDeleteRequest(BaseModel):
     """Request body for deleting an API key token."""
 
     target_api_key: str = Field(..., description="API key token to delete.")

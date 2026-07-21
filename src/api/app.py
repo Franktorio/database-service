@@ -19,7 +19,7 @@ from src.models.database import init_db
 
 from src.api.config import VIEW_LEVEL, COOKIE_JWT_INDEX
 
-from src.api.models import APIRequestBase, LoginRequestBase
+from src.api.models import LoginRequestBase
 from src.services.logging import log_message
 
 PRINT_PREFIX = "API APP"
@@ -74,10 +74,10 @@ async def root(request: Request):
 @app.post("/api-auth-test")
 @with_ip_block
 @api_authentication(permission_level=VIEW_LEVEL)
-async def auth_test(request: APIRequestBase):
+async def auth_test(request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Auth test endpoint called.")
     return {
-        "message": f"API key is valid: {request._api_data}"
+        "message": f"API key is valid: {request.state.api_data}"
     }
 
 @app.post("/login-auth-test")

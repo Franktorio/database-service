@@ -1,4 +1,4 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.system.user_db_endpoints.models import UserDeleteRequest
@@ -14,11 +14,11 @@ PRINT_PREFIX = "DELETE USER DB ROUTES"
 @router.delete("/delete")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def remove_user(request: UserDeleteRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user delete request for username {request.username}.")
+async def remove_user(request: Request, model: UserDeleteRequest):
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user delete request for username {model.username}.")
 
-    deleted = await delete_user(request.username)
+    deleted = await delete_user(model.username)
     if not deleted:
-        raise HTTPException(status_code=404, detail=f"User '{request.username}' not found.")
+        raise HTTPException(status_code=404, detail=f"User '{model.username}' not found.")
 
-    return {"message": f"User '{request.username}' deleted successfully."}
+    return {"message": f"User '{model.username}' deleted successfully."}

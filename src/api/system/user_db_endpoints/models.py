@@ -1,11 +1,9 @@
 # Request models for user database administration endpoints.
 
-from pydantic import Field
-
-from src.api.models import APIRequestBase
+from pydantic import BaseModel, Field
 
 
-class UserCreateRequest(APIRequestBase):
+class UserCreateRequest(BaseModel):
     """Request body for creating a user account."""
 
     username: str = Field(..., description="Username for the new user.")
@@ -15,7 +13,7 @@ class UserCreateRequest(APIRequestBase):
     login_rate_limit: int = Field(default=10, ge=1, description="Allowed login attempts per minute.")
 
 
-class UserUpdateRequest(APIRequestBase):
+class UserUpdateRequest(BaseModel):
     """Request body for updating a user's metadata."""
 
     username: str = Field(..., description="Username of the user to update.")
@@ -25,21 +23,21 @@ class UserUpdateRequest(APIRequestBase):
     remove_role: str | None = Field(default=None, description="Optional role to remove.")
 
 
-class UserPasswordUpdateRequest(APIRequestBase):
+class UserPasswordUpdateRequest(BaseModel):
     """Request body for updating a user's password."""
 
     username: str = Field(..., description="Username of the user whose password is being changed.")
     new_password: str = Field(..., description="New password value.")
 
 
-class UserLoginRateLimitUpdateRequest(APIRequestBase):
+class UserLoginRateLimitUpdateRequest(BaseModel):
     """Request body for updating a user's login rate limit."""
 
     username: str = Field(..., description="Username of the user to update.")
     new_login_rate_limit: int = Field(..., ge=1, description="New login rate limit per minute.")
 
 
-class UserDeleteRequest(APIRequestBase):
+class UserDeleteRequest(BaseModel):
     """Request body for deleting a user."""
 
     username: str = Field(..., description="Username of the user to delete.")

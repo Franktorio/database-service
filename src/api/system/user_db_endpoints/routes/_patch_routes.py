@@ -1,4 +1,4 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from config.loader import PASSWORD_HASH_ALGORITHM, PASSWORD_HASH_ITERATIONS
 from src.api.config import SUPER_ADMIN_LEVEL
@@ -24,21 +24,21 @@ PRINT_PREFIX = "PATCH USER DB ROUTES"
 @router.patch("/update")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def patch_user(request: UserUpdateRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user update request for username {request.username}.")
+async def patch_user(request: Request, model: UserUpdateRequest):
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user update request for username {model.username}.")
     try:
         updated = await update_user(
-            request.username,
-            new_email=request.new_email,
-            set_roles=request.set_roles,
-            add_role=request.add_role,
-            remove_role=request.remove_role,
+            model.username,
+            new_email=model.new_email,
+            set_roles=model.set_roles,
+            add_role=model.add_role,
+            remove_role=model.remove_role,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     if updated is None:
-        raise HTTPException(status_code=404, detail=f"User '{request.username}' not found.")
+        raise HTTPException(status_code=404, detail=f"User '{model.username}' not found.")
 
     return {
         "message": "User updated successfully.",
@@ -58,22 +58,22 @@ async def patch_user(request: UserUpdateRequest):
 @router.patch("/password")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def patch_user_password(request: UserPasswordUpdateRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user password update request for username {request.username}.")
+async def patch_user_password(request: Request, model: UserPasswordUpdateRequest):
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user password update request for username {model.username}.")
 
     new_password_hash, new_password_salt = hash_password(
-        request.new_password,
+        model.new_password,
         iterations=PASSWORD_HASH_ITERATIONS,
     )
     updated = await update_user_password(
-        request.username,
+        model.username,
         new_password_hash=new_password_hash,
         new_password_salt=new_password_salt,
         new_hash_iterations=PASSWORD_HASH_ITERATIONS,
         new_hash_algorithm=PASSWORD_HASH_ALGORITHM,
     )
     if updated is None:
-        raise HTTPException(status_code=404, detail=f"User '{request.username}' not found.")
+        raise HTTPException(status_code=404, detail=f"User '{model.username}' not found.")
 
     return {
         "message": "User password updated successfully.",
@@ -90,15 +90,15 @@ async def patch_user_password(request: UserPasswordUpdateRequest):
 @router.patch("/login-rate-limit")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def patch_user_login_rate_limit(request: UserLoginRateLimitUpdateRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received login-rate-limit update request for username {request.username}.")
+async def patch_user_login_rate_limit(request: Request, model: UserLoginRateLimitUpdateRequest):
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received login-rate-limit update request for username {model.username}.")
 
     updated = await update_user_login_rate_limit(
-        request.username,
-        new_login_rate_limit=request.new_login_rate_limit,
+        model.username,
+        new_login_rate_limit=model.new_login_rate_limit,
     )
     if updated is None:
-        raise HTTPException(status_code=404, detail=f"User '{request.username}' not found.")
+        raise HTTPException(status_code=404, detail=f"User '{model.username}' not found.")
 
     return {
         "message": "User login rate limit updated successfully.",

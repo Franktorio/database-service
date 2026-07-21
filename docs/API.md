@@ -7,8 +7,13 @@ This service exposes a small administrative API plus two authentication test flo
 - Most routes are wrapped with IP blocking.
 - API-key-protected routes use `api_authentication`.
 - Cookie-protected routes use `cookie_authentication`.
-- `GET` admin endpoints expect `api_key` as a query parameter.
-- Non-`GET` admin endpoints expect `api_key` in the JSON body.
+- API-key-protected endpoints require `Authorization: Bearer <api_key>`.
+
+Authorization format for API-key-protected endpoints:
+
+```http
+Authorization: Bearer your-api-key
+```
 
 ## Public/Test Endpoints
 
@@ -19,14 +24,6 @@ Returns a simple greeting payload.
 ### `POST /api-auth-test`
 
 Validates an API key and returns resolved permission metadata.
-
-Request body:
-
-```json
-{
-  "api_key": "your-api-key"
-}
-```
 
 ### `POST /login-auth-test`
 
@@ -59,10 +56,6 @@ Simple availability message for the API-key administration surface.
 
 Lists stored API keys.
 
-Query params:
-
-- `api_key`: SUPER_ADMIN bootstrap or existing SUPER_ADMIN key.
-
 Response shape:
 
 ```json
@@ -90,7 +83,6 @@ Request body:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "permission_level": 1,
   "rate_limit": 300,
   "email": "service@example.com"
@@ -121,7 +113,6 @@ Request body:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "key_hash": "target-key-hash",
   "new_permission_level": 2,
   "new_rate_limit": 500,
@@ -137,7 +128,6 @@ Request body:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "target_api_key": "raw-token-to-delete"
 }
 ```
@@ -152,17 +142,9 @@ All endpoints in this section require `SUPER_ADMIN_LEVEL`.
 
 Lists all users.
 
-Query params:
-
-- `api_key`: SUPER_ADMIN key.
-
 ### `GET /api/db/users/{username}`
 
 Fetches a single user by username.
-
-Query params:
-
-- `api_key`: SUPER_ADMIN key.
 
 ### `POST /api/db/users/create`
 
@@ -172,7 +154,6 @@ Request body:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "username": "alice",
   "password": "change-me-please",
   "initial_role": "admin",
@@ -189,7 +170,6 @@ Request body examples:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "username": "alice",
   "set_roles": ["admin", "editor"]
 }
@@ -197,7 +177,6 @@ Request body examples:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "username": "alice",
   "add_role": "auditor"
 }
@@ -205,7 +184,6 @@ Request body examples:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "username": "alice",
   "remove_role": "editor"
 }
@@ -219,7 +197,6 @@ Request body:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "username": "alice",
   "new_password": "new-secret"
 }
@@ -233,7 +210,6 @@ Request body:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "username": "alice",
   "new_login_rate_limit": 20
 }
@@ -247,7 +223,6 @@ Request body:
 
 ```json
 {
-  "api_key": "super-admin-api-key",
   "username": "alice"
 }
 ```
@@ -257,10 +232,9 @@ Request body:
 - API keys are stored as hashes, not raw tokens.
 - Cookie tokens are also stored by hash for revocation checks.
 - `SUPER_ADMIN` keys cannot be created through the HTTP API.
-- GET endpoints use query params for `api_key`, which is convenient but less ideal from a secret-handling perspective than a header.
+- API-key auth uses `Authorization: Bearer <api_key>` to avoid query/body secret transport.
 
 ## Known Gaps
 
 - API-key and cookie ratelimits are process-local.
-- Secret-bearing GET admin endpoints still accept `api_key` via query parameters instead of an authorization header.
 - Persistent logging occurs on auth success and failure paths, which adds DB dependency to control-plane traffic.

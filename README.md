@@ -161,8 +161,7 @@ SUPER_ADMIN API-key-protected endpoints:
 
 Important request-format note:
 
-- `GET` admin endpoints resolve `api_key` from query parameters via FastAPI `Depends()`.
-- Non-`GET` admin endpoints use JSON bodies containing `api_key`.
+- All API-key-protected endpoints use `Authorization: Bearer <api_key>`.
 
 ## Utility Scripts
 

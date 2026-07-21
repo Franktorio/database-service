@@ -1,7 +1,6 @@
-from fastapi import Depends
+from fastapi import Request
 
 from src.api.config import SUPER_ADMIN_LEVEL
-from src.api.models import APIRequestBase
 from src.api.system.user_db_endpoints.routes.router import router
 from src.models.crud.system.user_crud import get_user_by_username, get_users
 from src.security.api_security import api_authentication
@@ -14,7 +13,7 @@ PRINT_PREFIX = "GET USER DB ROUTES"
 @router.get("/list")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def list_users(request: APIRequestBase = Depends()):
+async def list_users(request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user list request.")
     users = await get_users()
     if not users:
@@ -42,7 +41,7 @@ async def list_users(request: APIRequestBase = Depends()):
 @router.get("/{username}")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def get_user(username: str, request: APIRequestBase = Depends()):
+async def get_user(username: str, request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received get-user request for username {username}.")
     user = await get_user_by_username(username)
     if user is None:

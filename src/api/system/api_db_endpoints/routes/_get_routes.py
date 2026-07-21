@@ -1,11 +1,10 @@
 # ~/src/api/api_db_endpoints/routes/_get_routes.py
 
-from fastapi import Depends, Request
+from fastapi import Request
 
 from src.api.system.api_db_endpoints.routes.router import router
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
-from src.api.models import APIRequestBase
 from src.security.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.models.crud.system.api_key_crud import get_api_keys
@@ -24,7 +23,7 @@ async def api_db_root(request: Request):
 @router.get("/list")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def list_api_keys(request: APIRequestBase = Depends()):
+async def list_api_keys(request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received API key list request.")
     api_keys = await get_api_keys()
     if not api_keys:

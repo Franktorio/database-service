@@ -4,14 +4,13 @@
 from functools import wraps
 import time
 import threading
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from src.models.tables.system.api_key_table import ApiKey
 from src.models.crud.system.api_key_crud import get_api_key
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.tokens import hash_token
 from src.security.ratelimit import RateLimit
-from src.api.models import APIRequestBase
 from src.api.config import PERM_LEVEL_MAP
 from src.services.logging import log_message
 
@@ -20,7 +19,7 @@ _last_seen_by_key: dict[str, float] = {}
 _cache_lock = threading.Lock()
 
 
-def _client_ip(request: APIRequestBase | None) -> str | None:
+def _client_ip(request: Request | None) -> str | None:
     if request is None:
         return None
     client = getattr(request, "client", None)
@@ -29,6 +28,32 @@ def _client_ip(request: APIRequestBase | None) -> str | None:
         if host:
             return host
     return None
+
+
+def _extract_request_from_call(args: tuple, kwargs: dict) -> Request | None:
+    for arg in args:
+        if isinstance(arg, Request):
+            return arg
+    for value in kwargs.values():
+        if isinstance(value, Request):
+            return value
+    return None
+
+
+def _extract_bearer_api_key(request: Request | None) -> str | None:
+    if request is None:
+        return None
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return None
+
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+
+    stripped = token.strip()
+    return stripped or None
 
 
 def _key_fingerprint(api_key: str) -> str:
@@ -131,10 +156,24 @@ def api_authentication(permission_level: int):
     """Decorator to validate API key and enforce rate limiting."""
     def decorator(func):
         @wraps(func)
-        async def wrapper(request: APIRequestBase, *args, **kwargs):
-            api_key = request.api_key
-            fingerprint = _key_fingerprint(api_key)
+        async def wrapper(*args, **kwargs):
+            request = _extract_request_from_call(args, kwargs)
+            api_key = _extract_bearer_api_key(request)
             client_ip = _client_ip(request)
+
+            if not api_key:
+                await safe_add_persistent_log(
+                    log_type="API AUTH",
+                    log_level="WARNING",
+                    message="API authentication failed: missing/invalid Authorization Bearer token",
+                    ip_address=client_ip,
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail="Missing or invalid Authorization header. Expected: Bearer <api_key>",
+                )
+
+            fingerprint = _key_fingerprint(api_key)
             ratelimit = await _obtain_ratelimit(api_key, ip_address=client_ip)
             
             if ratelimit is None:
@@ -202,10 +241,12 @@ def api_authentication(permission_level: int):
                 'requests_remaining': ratelimit.limit - ratelimit.requests,
                 'seconds_since_last_request': ratelimit.how_long_ago()
             }
+
+            if request is not None:
+                request.state.api_data = api_data
+                request._api_data = api_data
             
-            request._api_data = api_data
-            
-            return await func(request, *args, **kwargs)
+            return await func(*args, **kwargs)
         return wrapper
     return decorator
     

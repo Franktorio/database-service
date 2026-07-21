@@ -139,13 +139,11 @@ Primary reasons:
 
 ### What Is Below Industry Standards
 
-- GET admin endpoints accept `api_key` via query parameters.
 - Error shape consistency varies across routes.
 - Some endpoint semantics are operational RPC-style rather than strongly resource-oriented REST.
 
 ### What a Senior Engineer Would Likely Change
 
-- Move all API-key auth to headers (e.g., Authorization bearer pattern).
 - Standardize error envelope and status semantics.
 - Add versioning conventions and stricter OpenAPI contract governance.
 
@@ -174,7 +172,6 @@ Primary reasons:
 
 ### What Is Below Industry Standards
 
-- Query-parameter API keys on GET routes risk exposure via logs/history/proxies.
 - Abuse-control state is local-memory only (weak under multi-instance deployment).
 - Security-critical auth/session behavior is custom and needs stronger verification coverage.
 - IP identity uses `request.client.host` without a hardened trusted-proxy model.
@@ -376,15 +373,15 @@ Signals preventing senior/production-grade classification:
 ## Top 10 Weaknesses
 
 1. No automated test suite.
-2. Query-parameter secret transport on GET admin routes.
-3. Process-local security/abuse state (non-distributed).
-4. Migration strategy lacks revision history and deterministic evolution policy.
-5. Recovery flow still has destructive-risk concerns.
-6. Inconsistent transaction atomicity in composed CRUD flows.
-7. NullPool-only strategy without demonstrated load validation.
-8. Limited production observability stack.
-9. Daemon-thread operational jobs instead of supervised workers.
-10. Security-critical custom logic without deep regression harness.
+2. Process-local security/abuse state (non-distributed).
+3. Migration strategy lacks revision history and deterministic evolution policy.
+4. Recovery flow still has destructive-risk concerns.
+5. Inconsistent transaction atomicity in composed CRUD flows.
+6. NullPool-only strategy without demonstrated load validation.
+7. Limited production observability stack.
+8. Daemon-thread operational jobs instead of supervised workers.
+9. Security-critical custom logic without deep regression harness.
+10. Custom JWT/session implementation has limited interoperability and external validation.
 
 ---
 
@@ -396,7 +393,7 @@ In-process mutable state controls core security and abuse behavior, creating inc
 
 ### Biggest Security Concern
 
-Accepting API keys in query parameters for GET admin endpoints creates avoidable leakage risk.
+Process-local and custom security control state (rate limits/session guard behavior) is harder to reason about and less robust under distributed deployment than a shared-state design.
 
 ### Biggest Scalability Concern
 

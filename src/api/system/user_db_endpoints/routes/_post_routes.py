@@ -1,4 +1,4 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from config.loader import PASSWORD_HASH_ALGORITHM, PASSWORD_HASH_ITERATIONS
 from src.api.config import SUPER_ADMIN_LEVEL
@@ -16,26 +16,26 @@ PRINT_PREFIX = "POST USER DB ROUTES"
 @router.post("/create")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def create_user(request: UserCreateRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user create request for username {request.username}.")
+async def create_user(request: Request, model: UserCreateRequest):
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user create request for username {model.username}.")
 
-    existing_user = await get_user_by_username(request.username)
+    existing_user = await get_user_by_username(model.username)
     if existing_user is not None:
-        raise HTTPException(status_code=409, detail=f"User '{request.username}' already exists.")
+        raise HTTPException(status_code=409, detail=f"User '{model.username}' already exists.")
 
     password_hash, password_salt = hash_password(
-        request.password,
+        model.password,
         iterations=PASSWORD_HASH_ITERATIONS,
     )
     created_user = await add_user(
-        username=request.username,
+        username=model.username,
         password_hash=password_hash,
         password_salt=password_salt,
         hash_iterations=PASSWORD_HASH_ITERATIONS,
         hash_algorithm=PASSWORD_HASH_ALGORITHM,
-        email=request.email,
-        initial_role=request.initial_role,
-        login_rate_limit=request.login_rate_limit,
+        email=model.email,
+        initial_role=model.initial_role,
+        login_rate_limit=model.login_rate_limit,
     )
 
     return {

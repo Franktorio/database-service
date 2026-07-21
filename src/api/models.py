@@ -6,11 +6,6 @@ from src.services.logging import log_message
 
 PRINT_PREFIX = "API MODELS"
 
-class APIRequestBase(BaseModel):
-    """Base class for all API request models."""
-
-    api_key: str = Field(..., description="API key used to authorize the request.")
-
 class JWTRequestBase(BaseModel):
     """Base class for all JWT request models."""
 
