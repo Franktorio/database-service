@@ -32,6 +32,17 @@ def _client_ip(request) -> str | None:
     return None
 
 
+def _move_ratelimiter(old_token_hash: str, new_token_hash: str) -> RateLimit | None:
+    """Move the RateLimit instance from the old token hash to the new token hash in the ratelimiters dictionary."""
+    with _cache_lock:
+        old_ratelimit = _ratelimiters.pop(old_token_hash, None)
+        if old_ratelimit is not None:
+            _last_seen_by_token.pop(old_token_hash, None)
+            _ratelimiters[new_token_hash] = old_ratelimit
+            _last_seen_by_token[new_token_hash] = time.time()
+            return old_ratelimit
+    return None
+
 def _place_in_ratelimiters(token_hash: str, rate_limit: int) -> RateLimit:
     current_time = time.time()
     _ratelimiters[token_hash] = RateLimit(
@@ -246,11 +257,8 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token could not be refreshed.")
-            with _cache_lock:
-                old_ratelimit = _ratelimiters.pop(token_hash, None)
-            if old_ratelimit is not None:
-                _last_seen_by_token.pop(token_hash, None)
-                _place_in_ratelimiters(refreshed_token_hash, old_ratelimit.limit)
+            
+            _move_ratelimiter(old_token_hash=token_hash, new_token_hash=refreshed_token_hash)
 
             request._cookie_data["token_hash"] = refreshed_token_hash[:12]
 

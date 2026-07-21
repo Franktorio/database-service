@@ -13,9 +13,9 @@ from config.loader import (
     POSTGRESQL_PASSWORD,
     POSTGRESQL_HOST,
     POSTGRESQL_PORT,
-    AsyncSessionLocal,
 )
 from sqlalchemy import text
+from src.models.database import SessionLocal
 from src.services.logging import log_message
 
 PRINT_PREFIX = "DBHEALTHCHECK"
@@ -53,7 +53,7 @@ def get_last_backup():
 
 async def database_query_check():
     try:
-        async with AsyncSessionLocal() as session:
+        async with SessionLocal() as session:
             await session.execute(text("SELECT 1"))
         return True
 

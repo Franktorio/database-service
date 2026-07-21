@@ -4,7 +4,7 @@
 from typing import Optional
 from pydantic import Field
 
-from src.api.config import VIEW_LEVEL
+from src.api.config import VIEW_LEVEL, SUPER_ADMIN_LEVEL
 from src.api.models import APIRequestBase
 from src.services.logging import log_message
 
@@ -14,7 +14,7 @@ PRINT_PREFIX = "API DB MODELS"
 class ApiKeyCreateRequest(APIRequestBase):
     """Request body for creating a new API key."""
 
-    permission_level: int = Field(default=VIEW_LEVEL, ge=1, le=5, description="Permission level for the new API key.")
+    permission_level: int = Field(default=VIEW_LEVEL, ge=VIEW_LEVEL, le=SUPER_ADMIN_LEVEL, description="Permission level for the new API key.")
     rate_limit: int = Field(default=1000, ge=1, description="Maximum number of requests per minute.")
     email: Optional[str] = Field(default=None, description="Optional email address associated with the API key.")
 
@@ -23,7 +23,7 @@ class ApiKeyUpdateRequest(APIRequestBase):
     """Request body for updating an existing API key."""
 
     key_hash: str = Field(..., description="Hash of the API key to update.")
-    new_permission_level: Optional[int] = Field(default=None, ge=1, le=5, description="Optional replacement permission level.")
+    new_permission_level: Optional[int] = Field(default=None, ge=VIEW_LEVEL, le=SUPER_ADMIN_LEVEL, description="Optional replacement permission level.")
     new_rate_limit: Optional[int] = Field(default=None, ge=1, description="Optional replacement requests-per-minute limit.")
     new_email: Optional[str] = Field(default=None, description="Optional replacement email associated with the API key.")
 
