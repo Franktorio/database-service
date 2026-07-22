@@ -22,6 +22,8 @@ _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _log_queue = queue.Queue(maxsize=10000)  # Limit the queue size to prevent excessive memory usage
 _worker_started = False
 
+_warned_incase_logging_not_started = False  # Flag to ensure we only warn once if logging is not started
+
 def _build_logger() -> logging.Logger:
     logger = logging.getLogger("database_service")
     logger.setLevel(logging.DEBUG if DEBUG_ENABLED else logging.INFO)
@@ -67,7 +69,10 @@ def log_message(*args: Any, **kwargs: Any) -> None:
     message = " ".join(str(arg) for arg in args)
     
     if not _worker_started:
-        print(f"[WARNING] [{PRINT_PREFIX}] Logging worker not started. Message will be printed directly:")
+        global _warned_incase_logging_not_started
+        if not _warned_incase_logging_not_started:
+            print(f"[WARNING] [{PRINT_PREFIX}] Logging worker not started. Messages will be printed directly:")
+            _warned_incase_logging_not_started = True
         print(message)
         return
 
