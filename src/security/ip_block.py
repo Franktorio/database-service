@@ -10,7 +10,7 @@ from functools import wraps
 from fastapi import Request, HTTPException
 
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
-from src.security.ratelimit import RateLimit
+from src.security.ratelimit import RateLimit, RateLimitServiceUnavailable
 from config.loader import (
     IP_BLOCKING_ENABLED,
     IP_BLOCKING_THRESHOLD,
@@ -106,14 +106,28 @@ def with_ip_block(func):
             blocked_until = _blocked_until_by_ip.get(ip_address, 0.0)
             if blocked_until > now:
                 blocked_retry_after = blocked_until - now
+                limiter = None
             else:
                 limiter = _get_or_create_ip_ratelimit(ip_address)
-                allowed, status = limiter.is_allowed()
-                if not allowed:
-                    _blocked_until_by_ip[ip_address] = now + IP_BLOCKING_DURATION
-                    newly_blocked = True
-                    blocked_retry_after = float(IP_BLOCKING_DURATION)
                 _last_seen_by_ip[ip_address] = now
+
+        if blocked_retry_after is None and limiter is not None:
+            try:
+                allowed, _ = await limiter.is_allowed()
+            except RateLimitServiceUnavailable:
+                await safe_add_persistent_log(
+                    log_type="SERVICE",
+                    log_level="ERROR",
+                    message="IP block limiter unavailable: Redis is not reachable.",
+                    ip_address=ip_address,
+                )
+                raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
+
+            if not allowed:
+                with _ip_lock:
+                    _blocked_until_by_ip[ip_address] = time.time() + IP_BLOCKING_DURATION
+                newly_blocked = True
+                blocked_retry_after = float(IP_BLOCKING_DURATION)
 
         if blocked_retry_after is not None:
             if newly_blocked:

@@ -9,6 +9,7 @@ from config.loader import PROJECT_ROOT
 from src.security.api_security import cleanup_inactive_ratelimiters
 from src.security.cookie_security import cleanup_inactive_cookie_ratelimiters
 from src.security.password_security import cleanup_inactive_password_ratelimiters
+from src.services.system.cache.redis.client import RedisClient
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "RATELIMIT CACHE SERVICE"
@@ -22,12 +23,23 @@ RATELIMIT_CACHE_SWEEP_INTERVAL = LOCALCONFIG.get("sweep_interval", 60)
 RATELIMIT_CACHE_MAX_INACTIVE_SECONDS = LOCALCONFIG.get("max_inactive_seconds", 900)
 
 
+async def _redis_is_healthy() -> bool:
+    return await RedisClient.ping()
+
+
 def _ratelimit_cache_loop() -> None:
     log_message(
         f"[INFO] [{PRINT_PREFIX}] Ratelimit cache cleanup loop started. "
         f"interval={RATELIMIT_CACHE_SWEEP_INTERVAL}s max_inactive={RATELIMIT_CACHE_MAX_INACTIVE_SECONDS}s"
     )
     while True:
+        redis_healthy = asyncio.run(_redis_is_healthy())
+        if not redis_healthy:
+            log_message(
+                f"[WARNING] [{PRINT_PREFIX}] Redis is unavailable. "
+                "Rate-limited endpoints will return 503 until Redis recovers."
+            )
+
         removed_api = cleanup_inactive_ratelimiters(RATELIMIT_CACHE_MAX_INACTIVE_SECONDS)
         removed_password = cleanup_inactive_password_ratelimiters() # This cleanup uses another default time
         removed_cookie = cleanup_inactive_cookie_ratelimiters(RATELIMIT_CACHE_MAX_INACTIVE_SECONDS)

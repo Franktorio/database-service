@@ -9,7 +9,7 @@ from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.crud.system.user_crud import get_user_by_username
 from src.security.tokens import create_cookie_token
-from src.security.ratelimit import RateLimit
+from src.security.ratelimit import RateLimit, RateLimitServiceUnavailable
 
 from src.security.tokens import verify_password
 
@@ -65,7 +65,16 @@ async def _obtain_ratelimit(username: str) -> RateLimit:
 async def authenticate_password(username: str, password: str, ip_address: str) -> bool:
     """Return True on success, otherwise raise HTTPException with persistent auth logging."""
     rate_limiter = await _obtain_ratelimit(username)
-    allowed, status = rate_limiter.is_allowed()
+    try:
+        allowed, status = await rate_limiter.is_allowed()
+    except RateLimitServiceUnavailable:
+        await safe_add_persistent_log(
+            log_type="SERVICE",
+            log_level="ERROR",
+            message="Password rate limiter unavailable: Redis is not reachable.",
+            ip_address=ip_address,
+        )
+        raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
     if not allowed:
         await safe_add_persistent_log(
             log_type="USER RATE LIMIT",

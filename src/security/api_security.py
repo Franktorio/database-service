@@ -10,7 +10,7 @@ from src.models.tables.system.api_key_table import ApiKey
 from src.models.crud.system.api_key_crud import get_api_key
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.tokens import hash_token
-from src.security.ratelimit import RateLimit
+from src.security.ratelimit import RateLimit, RateLimitServiceUnavailable
 from src.api.config import PERM_LEVEL_MAP
 from src.services.system.logging import log_message
 
@@ -206,7 +206,19 @@ def api_authentication(permission_level: int):
                 )
                 raise HTTPException(status_code=403, detail="Insufficient permissions.")
             
-            allowed, status = ratelimit.is_allowed()
+            try:
+                allowed, status = await ratelimit.is_allowed()
+            except RateLimitServiceUnavailable:
+                await safe_add_persistent_log(
+                    log_type="SERVICE",
+                    log_level="ERROR",
+                    message="API rate limiter unavailable: Redis is not reachable.",
+                    ip_address=client_ip,
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Rate limiter service unavailable.",
+                )
             if not allowed:
                 await safe_add_persistent_log(
                     log_type="API RATE LIMIT",
@@ -233,13 +245,20 @@ def api_authentication(permission_level: int):
                 ip_address=client_ip,
             )
             
+            seconds_since_last_request = 0.0
+            try:
+                seconds_since_last_request = await ratelimit.how_long_ago()
+            except RateLimitServiceUnavailable:
+                # Keep request processing successful even if telemetry field is unavailable.
+                seconds_since_last_request = 0.0
+
             api_data = {
                 'api_key_fingerprint': fingerprint,
                 'permission_level': ratelimit.permission_level,
                 'permission_name': PERM_LEVEL_MAP.get(ratelimit.permission_level, "UNKNOWN"),
                 'rate_limit': ratelimit.limit,
-                'requests_remaining': ratelimit.limit - ratelimit.requests,
-                'seconds_since_last_request': ratelimit.how_long_ago()
+                'requests_remaining': int(status) if allowed else 0,
+                'seconds_since_last_request': seconds_since_last_request,
             }
 
             if request is not None:
