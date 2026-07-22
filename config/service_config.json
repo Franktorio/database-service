@@ -24,6 +24,11 @@
         "command_subprocess_timeout_seconds": 60,
         "probe_subprocess_timeout_seconds": 60
     },
+    "setup_redis":
+    {
+        "command_subprocess_timeout_seconds": 60,
+        "probe_subprocess_timeout_seconds": 60
+    },
     "ratelimit_cache":
     {
         "enabled": true,

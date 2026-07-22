@@ -49,6 +49,10 @@ IP_BLOCKING_THRESHOLD: int = int(os.getenv('IP_BLOCKING_THRESHOLD', '300'))
 IP_BLOCKING_TIME_WINDOW: int = int(os.getenv('IP_BLOCKING_TIME_WINDOW', '10'))
 IP_BLOCKING_DURATION: int = int(os.getenv('IP_BLOCKING_DURATION', '3600'))
 
+# Redis configuration
+REDIS_HOST: str = os.getenv('REDIS_HOST', 'localhost')
+REDIS_PORT: int = int(os.getenv('REDIS_PORT', '6379'))
+REDIS_PASSWORD: str = os.getenv('REDIS_PASSWORD', 'change-me-before-production')
 
 def _is_unsafe_secret(value: str, known_default: str) -> bool:
     if not value:
@@ -63,6 +67,7 @@ def _enforce_secret_safety() -> None:
     unsafe_pepper = _is_unsafe_secret(API_KEY_PEPPER, 'dev-only-change-me')
     unsafe_password_pepper = _is_unsafe_secret(PASSWORD_PEPPER, 'dev-only-change-me-password')
     unsafe_jwt_secret = _is_unsafe_secret(JWT_SECRET, 'dev-only-change-me-jwt')
+    unsafe_redis_password = _is_unsafe_secret(os.getenv('REDIS_PASSWORD', ''), 'change-me-before-production')
 
     if OPERATING_MODE != 'development':
         if unsafe_password:
@@ -83,6 +88,11 @@ def _enforce_secret_safety() -> None:
         if unsafe_jwt_secret:
             raise RuntimeError(
                 "JWT_SECRET is not securely configured. "
+                "Set a strong secret in config/.env for non-development mode."
+            )
+        if unsafe_redis_password:
+            raise RuntimeError(
+                "REDIS_PASSWORD is not securely configured. "
                 "Set a strong secret in config/.env for non-development mode."
             )
 
@@ -107,7 +117,11 @@ def _enforce_secret_safety() -> None:
                 f"[WARNING] [{PRINT_PREFIX}] Using default JWT_SECRET in development. "
                 "Do not use this value in production."
             )
-
+        if unsafe_redis_password:
+            logger.warning(
+                f"[WARNING] [{PRINT_PREFIX}] Using default REDIS_PASSWORD in development. "
+                "Do not use this value in production."
+            )
 
 _enforce_secret_safety()
 
