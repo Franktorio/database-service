@@ -2,7 +2,7 @@
 
 import time
 from config.loader import RATE_LIMIT_WINDOW_SECONDS
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 class RateLimit:
     def __init__(self, limit: int, key_hash: str = "", permission_level: int = 0):

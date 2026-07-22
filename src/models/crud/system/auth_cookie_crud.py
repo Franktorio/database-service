@@ -5,7 +5,7 @@ from sqlalchemy import delete, select, update
 from src.models.database import SessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.tables.system.auth_cookie_table import AuthCookie
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "AUTH COOKIE CRUD"
 

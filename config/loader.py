@@ -4,14 +4,17 @@
 import dotenv
 import logging
 import os
+from pathlib import Path
 
 PRINT_PREFIX = "CONFIG LOADER"
 logger = logging.getLogger("database_service")
 
 # Load environment variables from .env file
 _env_file = os.getenv('ENV_FILE', '.env')
-_env_path = os.path.join(os.path.dirname(__file__), _env_file)
-dotenv.load_dotenv(_env_path)
+CONFIG_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CONFIG_DIR.parent
+_env_path = CONFIG_DIR / _env_file
+dotenv.load_dotenv(str(_env_path))
 
 OPERATING_MODE: str = os.getenv('OPERATING_MODE', 'development')
 

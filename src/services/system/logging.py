@@ -8,15 +8,14 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-from config.loader import OPERATING_MODE
+from config.loader import OPERATING_MODE, PROJECT_ROOT
 
 PRINT_PREFIX = "LOG MANAGER"
 LOG_NAME = "db_service_logs"
 
 DEBUG_ENABLED = OPERATING_MODE == "development"
 
-_BASE_DIR = Path(__file__).resolve().parents[2]
-_LOG_DIR = _BASE_DIR / "logs"
+_LOG_DIR = PROJECT_ROOT / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _log_queue = queue.Queue(maxsize=10000)  # Limit the queue size to prevent excessive memory usage

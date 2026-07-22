@@ -1,17 +1,17 @@
 import asyncio
 import json
-import pathlib
 import threading
 import time
 
+from config.loader import PROJECT_ROOT
 from src.models.crud.system.auth_cookie_crud import revoke_expired_auth_cookies
 from src.models.database import SessionLocal
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "COOKIE EXPIRY SERVICE"
 
 LOCALCONFIG = json.loads(
-    (pathlib.Path(__file__).resolve().parents[2] / "config" / "service_config.json").read_text()
+    (PROJECT_ROOT / "config" / "service_config.json").read_text()
 ).get("cookie_expiry", {})
 
 COOKIE_EXPIRY_SERVICE_ENABLED = LOCALCONFIG.get("enabled", True)

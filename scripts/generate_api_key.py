@@ -5,7 +5,7 @@ import asyncio
 import sys
 
 from src.security.tokens import create_api_key
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "GENERATE API KEY SCRIPT"
 

@@ -2,7 +2,7 @@
 # Shared API request models.
 
 from pydantic import BaseModel, Field
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "API MODELS"
 

@@ -16,7 +16,7 @@ from src.models.crud.system.user_crud import get_user_by_username
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.ratelimit import RateLimit
 from src.security.tokens import create_jwt_token, decode_jwt_token, get_cookie_settings, hash_token
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 _ratelimiters: dict[str, RateLimit] = {}
 _last_seen_by_token: dict[str, float] = {}

@@ -12,7 +12,7 @@ from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.tokens import hash_token
 from src.security.ratelimit import RateLimit
 from src.api.config import PERM_LEVEL_MAP
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 _ratelimiters: dict[str, RateLimit] = {}
 _last_seen_by_key: dict[str, float] = {}

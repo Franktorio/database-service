@@ -1,6 +1,6 @@
 # ~/main.py - Entry point of application
-from src.services.logging import initialize_logging
-from src.services.logging import log_message
+from src.services.system.logging import initialize_logging
+from src.services.system.logging import log_message
 initialize_logging()
 
 PRINT_PREFIX = "MAIN"

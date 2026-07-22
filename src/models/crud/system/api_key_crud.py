@@ -4,7 +4,7 @@ from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.database import SessionLocal
 from src.models.tables.system.api_key_table import ApiKey
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "API KEY CRUD"
 

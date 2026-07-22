@@ -22,7 +22,7 @@ from config.loader import (
 from src.api.config import COOKIE_JWT_INDEX
 from src.models.crud.system.api_key_crud import add_api_key, get_api_key
 from src.models.crud.system.auth_cookie_crud import add_auth_cookie
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 
 def _b64url_encode(data: bytes) -> str:

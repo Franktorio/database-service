@@ -3,8 +3,8 @@
 import argparse
 import asyncio
 
-from src.services.dbhealthcheck import restore_from_backup
-from src.services.logging import log_message
+from src.services.system.dbhealthcheck import restore_from_backup
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "APPLY BACKUP SCRIPT"
 

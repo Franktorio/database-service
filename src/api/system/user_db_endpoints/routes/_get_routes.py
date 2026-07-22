@@ -5,7 +5,7 @@ from src.api.system.user_db_endpoints.routes.router import router
 from src.models.crud.system.user_crud import get_user_by_username, get_users
 from src.security.api_security import api_authentication
 from src.security.ip_block import with_ip_block
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "GET USER DB ROUTES"
 

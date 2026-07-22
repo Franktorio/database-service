@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.database import SessionLocal
 from src.models.tables.system.persistent_logs import PersistentLog, LOG_LEVEL, LOG_TYPES
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "PERSISTENT LOGS CRUD"
 

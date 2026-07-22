@@ -1,18 +1,18 @@
 import asyncio
 import json
-import pathlib
 import threading
 import time
 
+from config.loader import PROJECT_ROOT
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.database import SessionLocal
 from src.security.ip_block import cleanup_inactive_ip_blocks
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "IP BLOCK CACHE SERVICE"
 
 LOCALCONFIG = json.loads(
-    (pathlib.Path(__file__).resolve().parents[2] / "config" / "service_config.json").read_text()
+    (PROJECT_ROOT / "config" / "service_config.json").read_text()
 ).get("ip_block_cache", {})
 
 IP_BLOCK_CACHE_ENABLED = LOCALCONFIG.get("enabled", True)

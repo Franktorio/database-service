@@ -17,7 +17,7 @@ from config.loader import (
     IP_BLOCKING_TIME_WINDOW,
     IP_BLOCKING_DURATION,
 )
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 _ip_requests: dict[str, RateLimit] = {}  # Maps IP addresses to a RateLimit object that tracks the number of requests and the time window.
 _blocked_until_by_ip: dict[str, float] = {}

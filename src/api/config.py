@@ -1,4 +1,4 @@
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 # ~/src/api/config.py
 # Configuration settings for the API service. Change as needed for your own deployment.
 

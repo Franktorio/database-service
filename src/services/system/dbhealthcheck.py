@@ -5,9 +5,10 @@ import threading
 import subprocess
 import asyncio
 import time
-import pathlib
 import json
+from pathlib import Path
 from config.loader import (
+    PROJECT_ROOT,
     POSTGRESQL_DATABASE_NAME,
     POSTGRESQL_USERNAME,
     POSTGRESQL_PASSWORD,
@@ -16,12 +17,12 @@ from config.loader import (
 )
 from sqlalchemy import text
 from src.models.database import SessionLocal
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "DBHEALTHCHECK"
 
 LOCALCONFIG = json.loads(
-    (pathlib.Path(__file__).resolve().parents[2] / "config" / "service_config.json").read_text()
+    (PROJECT_ROOT / "config" / "service_config.json").read_text()
 )["dbhealthchecker"]
 
 HEALTHCHECK_ENABLED = LOCALCONFIG.get("enabled", True)
@@ -33,9 +34,9 @@ REPARATIONS_INTERVAL = LOCALCONFIG.get("reparations_interval", 5) # if auto_roll
 HEALTHCHECK_TIMEOUT_SECONDS = LOCALCONFIG.get("healthcheck_timeout_seconds", 30)
 RESTORE_SUBPROCESS_TIMEOUT_SECONDS = LOCALCONFIG.get("restore_subprocess_timeout_seconds", 30)
 MAX_RESTORE_ATTEMPTS = LOCALCONFIG.get("max_restore_attempts", 3)
-BACKUP_DIR = pathlib.Path(
-    LOCALCONFIG.get("backup_dir", "backups")
-)
+BACKUP_DIR = Path(LOCALCONFIG.get("backup_dir", "backups"))
+if not BACKUP_DIR.is_absolute():
+    BACKUP_DIR = PROJECT_ROOT / BACKUP_DIR
 
 
 def get_last_backup():
@@ -170,7 +171,7 @@ def remove_bad_backup(backup_file):
 def healthcheck_service():
     _healthy = True
     _restore_attempted = False
-    _last_restored_backup: pathlib.Path = None
+    _last_restored_backup: Path | None = None
     _restore_attempts = 0
 
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting database healthcheck service with interval {INTERVAL} seconds.")

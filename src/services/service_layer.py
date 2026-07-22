@@ -1,11 +1,11 @@
 # ~/src/services/service_layer.py
 
-from src.services.backup import start_backup_service as _start_backup_service
-from src.services.cookieexpiry import start_cookie_expiry_service as _start_cookie_expiry_service
-from src.services.dbhealthcheck import start_healthcheck_service as _start_healthcheck_service
-from src.services.ipblockcache import start_ip_block_cache_service as _start_ip_block_cache_service
-from src.services.ratelimitcache import start_ratelimit_cache_service as _start_ratelimit_cache_service
-from src.services.logging import log_message
+from src.services.system.backup import start_backup_service as _start_backup_service
+from src.services.system.cookieexpiry import start_cookie_expiry_service as _start_cookie_expiry_service
+from src.services.system.dbhealthcheck import start_healthcheck_service as _start_healthcheck_service
+from src.services.system.cache.ipblockcache import start_ip_block_cache_service as _start_ip_block_cache_service
+from src.services.system.cache.ratelimitcache import start_ratelimit_cache_service as _start_ratelimit_cache_service
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "SERVICE LAYER"
 

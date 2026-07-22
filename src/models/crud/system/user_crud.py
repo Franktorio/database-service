@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.database import SessionLocal
 from src.models.crud.system.auth_cookie_crud import delete_auth_cookies_by_username
 from src.models.tables.system.user_table import User
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "USER CRUD"
 

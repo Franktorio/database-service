@@ -16,7 +16,7 @@ from config.loader import (
     REDIS_PORT,
     REDIS_PASSWORD,
 )
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "SETUP REDIS SCRIPT"
 

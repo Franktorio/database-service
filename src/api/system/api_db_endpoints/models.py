@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from src.api.config import VIEW_LEVEL, SUPER_ADMIN_LEVEL
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "API DB MODELS"
 

@@ -4,7 +4,7 @@ from sqlalchemy import DateTime, Index, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.base import Base
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "AUTH COOKIE TABLE"
 

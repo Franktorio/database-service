@@ -2,7 +2,7 @@ from .system import api_key_table
 from .system import user_table
 from .system import auth_cookie_table
 from .system import persistent_logs
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "TABLES INIT"
 

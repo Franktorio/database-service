@@ -9,7 +9,7 @@ from src.security.api_security import api_authentication, refresh_ratelimiter
 from src.security.ip_block import with_ip_block
 from src.api.system.api_db_endpoints.models import ApiKeyCreateRequest, ApiKeyUpdateRequest
 from src.models.crud.system.api_key_crud import update_api_key
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "POST API DB ROUTES"
 

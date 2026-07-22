@@ -27,7 +27,7 @@ from config.loader import (
 )
 from src.models.base import Base
 import src.models.tables 
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 CHUNK_SIZE = 1000
 

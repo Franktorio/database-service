@@ -3,32 +3,33 @@
 import threading
 import subprocess
 import time
-import pathlib
 import json
 import os
+from pathlib import Path
 from datetime import datetime
 from config.loader import (
+    PROJECT_ROOT,
     POSTGRESQL_DATABASE_NAME,
     POSTGRESQL_USERNAME,
     POSTGRESQL_PASSWORD,
     POSTGRESQL_HOST,
     POSTGRESQL_PORT,
 )
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "BACKUP"
 
 LOCALCONFIG = json.loads(
-    (pathlib.Path(__file__).resolve().parents[2] / "config" / "service_config.json").read_text()
+    (PROJECT_ROOT / "config" / "service_config.json").read_text()
 )["backup"]
 
 
 INTERVAL = LOCALCONFIG.get("interval", 3600)
 RETENTION = LOCALCONFIG.get("retention", 7)
 BACKUP_ENABLED = LOCALCONFIG.get("enabled", True)
-BACKUP_DIR = pathlib.Path(
-    LOCALCONFIG.get("backup_dir", "backups")
-)
+BACKUP_DIR = Path(LOCALCONFIG.get("backup_dir", "backups"))
+if not BACKUP_DIR.is_absolute():
+    BACKUP_DIR = PROJECT_ROOT / BACKUP_DIR
 SUBPROCESS_TIMEOUT_SECONDS = LOCALCONFIG.get("subprocess_timeout_seconds", 30)
 
 

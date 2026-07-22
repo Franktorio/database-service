@@ -2,19 +2,19 @@
 
 import asyncio
 import json
-import pathlib
 import threading
 import time
 
+from config.loader import PROJECT_ROOT
 from src.security.api_security import cleanup_inactive_ratelimiters
 from src.security.cookie_security import cleanup_inactive_cookie_ratelimiters
 from src.security.password_security import cleanup_inactive_password_ratelimiters
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "RATELIMIT CACHE SERVICE"
 
 LOCALCONFIG = json.loads(
-    (pathlib.Path(__file__).resolve().parents[2] / "config" / "service_config.json").read_text()
+    (PROJECT_ROOT / "config" / "service_config.json").read_text()
 ).get("ratelimit_cache", {})
 
 RATELIMIT_CACHE_SERVICE_ENABLED = LOCALCONFIG.get("enabled", True)

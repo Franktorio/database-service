@@ -7,7 +7,7 @@ from config.loader import DATABASE_URL, OPERATING_MODE
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import NullPool
-from src.services.logging import log_message
+from src.services.system.logging import log_message
 
 PRINT_PREFIX = "DATABASE"
 
