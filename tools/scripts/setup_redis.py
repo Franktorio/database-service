@@ -7,28 +7,19 @@ import json
 import subprocess
 import sys
 
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-	sys.path.insert(0, str(PROJECT_ROOT))
-
 from config.loader import (
     REDIS_HOST,
     REDIS_PORT,
     REDIS_PASSWORD,
+    PROJECT_ROOT,
 )
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "SETUP REDIS SCRIPT"
 
-_SERVICE_CONFIG = json.loads(
-    (
-        pathlib.Path(__file__).resolve().parents[1]
-        / "config"
-        / "service_config.json"
-    ).read_text()
-)
-
-_SETUP_CONFIG = _SERVICE_CONFIG.get("setup_redis", {})
+_SETUP_CONFIG = json.loads(
+	(PROJECT_ROOT / "config" / "service_config.json").read_text()
+).get("setup_redis", {})
 
 COMMAND_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get(
     "command_subprocess_timeout_seconds",

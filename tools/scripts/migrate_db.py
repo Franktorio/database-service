@@ -9,10 +9,6 @@ PRINT_PREFIX = "MIGRATION SCRIPT"
 
 # USAGE (on project root): python3 -m tools.scripts.migrate_db
 
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-	sys.path.insert(0, str(PROJECT_ROOT))
-
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import execute_batch
@@ -23,7 +19,7 @@ from config.loader import (
 	POSTGRESQL_HOST,
 	POSTGRESQL_PASSWORD,
 	POSTGRESQL_PORT,
-	POSTGRESQL_USERNAME,
+	POSTGRESQL_USERNAME
 )
 from src.models.base import Base
 import src.models.tables 
