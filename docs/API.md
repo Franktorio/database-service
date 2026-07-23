@@ -8,6 +8,7 @@ This service exposes a small administrative API plus two authentication test flo
 - API-key-protected routes use `api_authentication`.
 - Cookie-protected routes use `cookie_authentication`.
 - API-key-protected endpoints require `Authorization: Bearer <api_key>`.
+- Rate-limit counters are stored in Redis; protected auth routes return `503` if Redis is unavailable.
 
 Authorization format for API-key-protected endpoints:
 
@@ -239,7 +240,7 @@ Request body:
 
 ## Known Gaps
 
-- API-key and cookie ratelimits are process-local.
+- Temporary IP block metadata is still process-local, even though limiter counters are Redis-backed.
 - Persistent logging occurs on auth success and failure paths, which adds DB dependency to control-plane traffic.
 
 ## Live Test Notes

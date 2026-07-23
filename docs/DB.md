@@ -4,7 +4,7 @@ This document is a technical reference plus an operational audit of the current 
 
 ## Report Metadata
 
-- Date: 2026-07-21
+- Date: 2026-07-23
 - Scope: schema, initialization flow, CRUD behavior, services touching DB, migration and backup tooling
 - Basis: current main branch at HEAD in this workspace
 - Method: static code review across model, CRUD, security, service, and script layers
@@ -201,11 +201,11 @@ The auth stack is DB-coupled in specific places:
 - API key auth:
 	- Cache miss reads api_keys by key_hash.
 	- Success and failure paths write persistent_logs (best effort).
-	- Rate-limit metadata is cached in memory after first lookup.
+	- Rate-limit state is persisted in Redis and accessed through local limiter wrappers.
 - Password auth:
 	- Reads users by username.
 	- Writes persistent_logs for success/failure/rate-limit outcomes.
-	- User-specific password ratelimits are cached in memory.
+	- User-specific password ratelimit state is persisted in Redis.
 - Cookie issuance:
 	- New JWT hash is persisted in auth_cookies.
 
@@ -251,7 +251,7 @@ Operational caveat:
 
 ## Migration Behavior
 
-scripts/migrate_db.py implements a copy-and-swap migration strategy.
+tools/scripts/migrate_db.py implements a copy-and-swap migration strategy.
 
 Workflow:
 
@@ -281,13 +281,13 @@ Why this matters:
 
 Current DB design assumptions are single-node and moderate load:
 
-- In-memory ratelimiter and block caches are process-local.
+- Ratelimiter counters are Redis-backed; some resolver/block metadata remains process-local.
 - NullPool favors correctness simplicity over high-throughput connection reuse.
 - Auth paths include both read and write DB activity (especially with persistent logs enabled).
 
 Scaling caveat:
 
-- Multiple app instances will not share in-memory limiter state unless moved to an external shared store.
+- Multiple app instances can share limiter counters through Redis, but temporary local block metadata still has per-process behavior.
 
 ## High-Value Hardening Backlog
 
