@@ -15,7 +15,7 @@ from src.security.ip_block import with_ip_block
 from src.security.password_security import auth_and_grant_token
 from src.security.cookie_security import cookie_authentication
 from src.security.tokens import get_cookie_settings
-from src.models.database import init_db
+from src.models.database import init_db, close_db
 
 from src.api.config import VIEW_LEVEL
 
@@ -41,7 +41,8 @@ async def lifespan(app: fastapi.FastAPI):
 
     yield # Application waits here while running, then resumes after shutdown.
 
-    log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan shutdown complete.")
+    log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan shutdown complete... performing cleanup.")
+    await close_db()
 
 app = fastapi.FastAPI(
     lifespan=lifespan

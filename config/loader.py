@@ -30,6 +30,13 @@ DATABASE_URL = (
     f"postgresql+asyncpg://{POSTGRESQL_USERNAME}:{POSTGRESQL_PASSWORD}@{POSTGRESQL_HOST}:{POSTGRESQL_PORT}/{POSTGRESQL_DATABASE_NAME}"
 )
 
+# Pool configuration
+POSTGRESQL_POOL_SIZE: int = int(os.getenv('POSTGRESQL_POOL_SIZE', '10'))
+POSTGRESQL_POOL_MAX_OVERFLOW: int = int(os.getenv('POSTGRESQL_POOL_MAX_OVERFLOW', '20'))
+POSTGRESQL_POOL_TIMEOUT_SECONDS: int = int(os.getenv('POSTGRESQL_POOL_TIMEOUT_SECONDS', '30'))
+POSTGRESQL_POOL_RECYCLE_SECONDS: int = int(os.getenv('POSTGRESQL_POOL_RECYCLE_SECONDS', '1800'))
+POSTGRESQL_POOL_PRE_PING: bool = os.getenv('POSTGRESQL_POOL_PRE_PING', 'true').lower() in ('true', '1', 't')
+
 # API server configuration
 API_ENABLED: bool = os.getenv('API_ENABLED', 'True').lower() in ('true', '1', 't')
 API_PORT: int = int(os.getenv('API_PORT', '8000'))
