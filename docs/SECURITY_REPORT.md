@@ -1,406 +1,269 @@
-# Full Codebase Cybersecurity Evaluation
+# Cybersecurity Report
 
-## Report Metadata
+Date: 2026-07-23
+Scope: Whole-application cybersecurity assessment focused on architecture, authentication/authorization, secrets, vulnerabilities, reliability under attack, and operational security.
 
-- Date: 2026-07-23
-- Scope: whole-project cybersecurity assessment against modern backend security standards
-- Basis: current main branch in this workspace
-- Method: static code review of authentication, authorization, secrets, transport, data handling, operations, and dependency posture
-- Testing status: no automated security tests detected in repository
+## Executive Summary
 
-## Executive Verdict
+The security baseline is better than typical early-stage hobby projects, but it is not production-hardened. The most important concerns are custom implementation of critical security primitives, inconsistent distributed control-state assumptions, and limited dedicated security testing.
 
-This codebase has a **security-aware baseline** but is **not yet production-grade from a cybersecurity standpoint**.
-
-Primary reasons:
-
-- Good fundamentals exist (hashed token storage, PBKDF2 password hashing, explicit permission checks, secret-default enforcement outside development).
-- Several high-impact hardening gaps remain (custom JWT/session model, API-key invalidation race windows after delete/update, weak proxy/edge trust model, no automated security tests).
+Overall security score: 5/10
 
 ---
 
-## 1) Authentication & Session Security
+## Security Category Scores
 
-**Score: 5.5/10**
+### 1. Security Architecture
 
-### What Is Done Well
+Score: 5/10
 
-- API keys and cookie tokens are stored as hashes, not plaintext.
-- Password verification uses `hmac.compare_digest` with PBKDF2-derived hashes.
-- Cookie rows support revocation and expiration checks server-side.
+What is done well:
+- Security concerns are split into dedicated modules for API key auth, cookie auth, password auth, IP block, and rate limiting.
+- Auth checks are layered through decorators, making control points explicit.
 
-### What Is Below Industry Standards
+What is below industry standards:
+- Security decision state is split across process memory and Redis.
+- Security controls may behave differently across instances/workers under scale.
 
-- JWT implementation is custom and only enforces a minimal claim set/signature flow.
-- Session refresh happens on every authenticated cookie request, increasing complexity and failure paths.
-- Cookie policy uses `SameSite=lax` with no explicit CSRF token strategy for cookie-authenticated actions.
+What a senior security engineer would likely change:
+- Centralize mutable security state (rate limits, blocklists, session state) in a shared authoritative store.
+- Add explicit threat models for single-instance vs multi-instance deployment modes.
 
-### What a Senior Security Engineer Would Likely Change
+How serious this is:
+- High for horizontally scaled deployments.
 
-- Replace custom JWT implementation with hardened, well-maintained JWT/session primitives.
-- Add explicit CSRF defenses for all cookie-authenticated state-changing flows.
-- Add formal session threat modeling and regression tests for replay/revocation/rotation edge cases.
-
-### Seriousness
-
-- **High**.
-
-### Concrete Examples
-
-- `/home/runner/work/database-service/database-service/src/security/tokens.py`
-- `/home/runner/work/database-service/database-service/src/security/cookie_security.py`
-- `/home/runner/work/database-service/database-service/src/security/password_security.py`
+Concrete examples:
+- src/security/api_security.py
+- src/security/password_security.py
+- src/security/cookie_security.py
+- src/security/ip_block.py
 
 ---
 
-## 2) Authorization & Access Control
+### 2. Authentication
 
-**Score: 6.5/10**
+Score: 6/10
 
-### What Is Done Well
+What is done well:
+- API keys are never stored in plaintext.
+- Passwords are PBKDF2-hashed with salt and pepper.
+- Cookie token hashes are persisted for revocation checks.
 
-- Permission levels are explicit and consistently checked on admin endpoints.
-- Route decorators centralize auth decisions instead of scattering checks ad hoc.
-- Role checks are normalized to lowercase and validated before endpoint execution.
+What is below industry standards:
+- Custom JWT implementation increases long-term correctness and maintenance risk.
+- Session lifecycle controls are basic (limited advanced anomaly/replay controls).
 
-### What Is Below Industry Standards
+What a senior security engineer would likely change:
+- Use a well-vetted JWT/auth library with hardened validation defaults.
+- Add token rotation and stronger session invalidation policy.
 
-- Authorization logic is heavily decorator-coupled and not covered by tests.
-- Access-control assumptions are documented in code but lack policy-as-code verification.
-- No defense-in-depth controls such as endpoint-level audit assertions in CI.
+How serious this is:
+- High, because auth implementation flaws are high-impact.
 
-### What a Senior Security Engineer Would Likely Change
-
-- Add authorization matrix tests (role x endpoint x method).
-- Add policy verification in CI with mandatory negative tests.
-- Introduce structured authorization decision logs tied to request IDs.
-
-### Seriousness
-
-- **Medium-high**.
-
-### Concrete Examples
-
-- `/home/runner/work/database-service/database-service/src/security/api_security.py`
-- `/home/runner/work/database-service/database-service/src/security/cookie_security.py`
-- `/home/runner/work/database-service/database-service/src/api/system/`
+Concrete examples:
+- src/security/tokens.py
+- src/security/cookie_security.py
+- src/security/password_security.py
 
 ---
 
-## 3) Secret Management & Cryptography
+### 3. Authorization
 
-**Score: 6/10**
+Score: 6/10
 
-### What Is Done Well
+What is done well:
+- Permission levels are enforced for API-key-protected routes.
+- Role checks exist for cookie-authenticated flows.
 
-- Non-development mode blocks unsafe defaults for DB password, peppers, and JWT secret.
-- Password hashing is configurable and defaults to PBKDF2-SHA256 with high iteration count.
-- Token/signature verification uses constant-time comparison.
+What is below industry standards:
+- Authorization model remains relatively simple and coarse.
+- Policy governance and role/permission evolution path is not formalized.
 
-### What Is Below Industry Standards
+What a senior security engineer would likely change:
+- Introduce explicit policy layer (RBAC/ABAC strategy with centralized decision logic).
+- Add authorization test matrix for privilege escalation scenarios.
 
-- Development mode allows insecure default secrets, creating risk if misconfigured environments drift.
-- Database URL is string-interpolated directly from secret values (encoding/special-character risk).
-- No key rotation workflow or documented secret lifecycle process.
+How serious this is:
+- Medium to high.
 
-### What a Senior Security Engineer Would Likely Change
-
-- Build DSN via safe URL constructors with credential encoding.
-- Define and automate key/secret rotation procedures.
-- Enforce environment-tier secret validation policies with startup and CI checks.
-
-### Seriousness
-
-- **Medium-high**.
-
-### Concrete Examples
-
-- `/home/runner/work/database-service/database-service/config/loader.py`
-- `/home/runner/work/database-service/database-service/src/models/database.py`
-- `/home/runner/work/database-service/database-service/src/security/tokens.py`
+Concrete examples:
+- src/security/api_security.py
+- src/security/cookie_security.py
 
 ---
 
-## 4) Abuse Prevention (Rate Limiting & IP Blocking)
+### 4. Secret Management
 
-**Score: 6/10**
+Score: 6/10
 
-### What Is Done Well
+What is done well:
+- Non-development mode enforces non-default secrets.
+- Security-sensitive values are loaded from environment.
 
-- API keys, login attempts, cookie tokens, and IP addresses all have explicit abuse controls.
-- Cleanup workers exist to limit unbounded cache growth.
-- Retry-after responses are returned for blocked/limited requests.
-- Redis-backed rate limiting with Lua-script atomic updates materially reduces concurrency bypass risk compared to non-atomic cache updates.
+What is below industry standards:
+- No visible external secret manager/KMS integration.
+- DSN construction through direct string interpolation can be brittle with special characters.
 
-### What Is Below Industry Standards
+What a senior security engineer would likely change:
+- Integrate secret management provider (Vault/KMS/cloud secret manager).
+- Use safer URL assembly/encoding for credentials.
 
-- API-key delete/update invalidation is not fully atomic with request auth lookups, leaving short stale-cache windows where deleted or downgraded keys may still pass.
-- IP block tracking still depends on local in-process resolver/cache behavior even though limiter counters are Redis-backed.
-- IP identity handling remains sensitive to proxy-edge deployment correctness.
-- Blocking and limiter behavior is not validated by automated abuse-path tests.
+How serious this is:
+- Medium.
 
-### What a Senior Security Engineer Would Likely Change
-
-- Move abuse-control state to shared infrastructure (for example Redis) with clear consistency semantics.
-- Add atomic key-lifecycle invalidation semantics (tombstone/version check or DB-authoritative recheck on key changes).
-- Add explicit trusted-proxy strategy for IP extraction.
-- Add deterministic tests for burst, distributed, and evasion scenarios.
-
-### Seriousness
-
-- **High**.
-
-### Concrete Examples
-
-- `src/security/ratelimit.py`
-- `src/security/api_security.py`
-- `src/security/password_security.py`
-- `src/security/ip_block.py`
+Concrete examples:
+- config/loader.py
 
 ---
 
-## 5) Input Handling & Injection Resistance
+### 5. Vulnerability Exposure (Common Weaknesses)
 
-**Score: 5.5/10**
+Score: 4/10
 
-### What Is Done Well
+What is done well:
+- Many invalid auth paths are rejected with proper HTTP errors.
+- Rate limiting and IP blocking exist.
 
-- API request models use Pydantic type enforcement and basic bounds.
-- Core application CRUD paths use SQLAlchemy query builders rather than raw SQL.
-- Migration script uses parameterized psycopg2 SQL composition for high-risk operations.
+What is below industry standards:
+- Some controls are deployment-sensitive (proxy trust assumptions).
+- Potential DoS amplification via persistent DB writes on repeated auth failures.
+- No evidence of automated dependency vulnerability scanning in workflow.
 
-### What Is Below Industry Standards
+What a senior security engineer would likely change:
+- Add strict trusted proxy policy and tests.
+- Introduce logging/backpressure controls to prevent auth-failure write amplification.
+- Add dependency and SAST scanning gates.
 
-- Some operational scripts/services still construct SQL/commands with interpolated config values.
-- No centralized validation standards for usernames/emails/password complexity at API boundary.
-- No automated negative testing for malformed or hostile payloads.
+How serious this is:
+- High.
 
-### What a Senior Security Engineer Would Likely Change
-
-- Standardize strict input validation policy (lengths, patterns, canonicalization, password policy).
-- Remove remaining string-interpolated SQL command fragments in operational paths.
-- Add injection-focused test coverage for service and script boundaries.
-
-### Seriousness
-
-- **Medium-high**.
-
-### Concrete Examples
-
-- `/home/runner/work/database-service/database-service/src/services/dbhealthcheck.py`
-- `/home/runner/work/database-service/database-service/scripts/setup_postgres.py`
-- `/home/runner/work/database-service/database-service/src/api/system/user_db_endpoints/models.py`
+Concrete examples:
+- src/security/ip_block.py
+- src/security/api_security.py
+- src/security/password_security.py
+- requirements.txt
 
 ---
 
-## 6) Transport & Edge Security
+### 6. Reliability Under Attack
 
-**Score: 4.5/10**
+Score: 5/10
 
-### What Is Done Well
+What is done well:
+- Redis outages in limiter paths produce explicit service-unavailable behavior.
+- Abuse controls (ratelimits/IP blocking) are implemented.
 
-- Cookie `secure` flag is enabled in production mode.
-- API key transport expects Authorization bearer format.
+What is below industry standards:
+- Security event persistence adds DB dependency to hot auth paths.
+- Recovery logic includes destructive DB actions in runtime context.
 
-### What Is Below Industry Standards
+What a senior security engineer would likely change:
+- Decouple high-volume security telemetry from synchronous request handling.
+- Move destructive recovery actions to controlled operator workflows.
 
-- Service binds directly on `0.0.0.0` and relies on external perimeter controls not enforced in-app.
-- No visible HTTPS redirect, trusted host enforcement, or explicit proxy header trust policy.
-- No explicit CORS policy configuration is present in the API app.
+How serious this is:
+- High.
 
-### What a Senior Security Engineer Would Likely Change
-
-- Define strict edge deployment contract (TLS termination, host allowlist, proxy trust chain).
-- Add explicit middleware policies for host, HTTPS behavior, and CORS.
-- Document and test security invariants expected from reverse proxies/load balancers.
-
-### Seriousness
-
-- **High** in internet-facing deployments; **medium** in tightly controlled internal networks.
-
-### Concrete Examples
-
-- `/home/runner/work/database-service/database-service/src/api/app.py`
-- `/home/runner/work/database-service/database-service/README.md`
+Concrete examples:
+- src/models/crud/system/persistent_logs_crud.py
+- src/services/system/dbhealthcheck.py
 
 ---
 
-## 7) Logging, Monitoring & Incident Readiness
+### 7. Security Testing
 
-**Score: 6/10**
+Score: 3/10
 
-### What Is Done Well
+What is done well:
+- End-to-end API test exists and exercises major route surfaces.
 
-- Auth and abuse events are persisted to the database with optional source IP.
-- Rotating file logs and structured log levels are present.
-- Persistent logging helpers are fail-safe and do not crash request paths.
+What is below industry standards:
+- Minimal dedicated security test suite.
+- Missing focused tests for JWT tampering, replay, auth bypass, proxy header spoofing, and abuse scenarios.
 
-### What Is Below Industry Standards
+What a senior security engineer would likely change:
+- Build dedicated security regression tests in CI.
+- Add threat-case test matrix for authz boundaries and abuse controls.
 
-- No visible SIEM integration, metrics alerts, or anomaly-detection pipeline.
-- Security telemetry is present but not paired with incident-response runbooks.
-- No assurance that sensitive data never reaches logs under all failure paths.
+How serious this is:
+- High.
 
-### What a Senior Security Engineer Would Likely Change
-
-- Add security observability stack (alerts, dashboards, retention policy, detection rules).
-- Add log-redaction guarantees and tests.
-- Formalize incident response and forensics workflow.
-
-### Seriousness
-
-- **Medium-high**.
-
-### Concrete Examples
-
-- `/home/runner/work/database-service/database-service/src/models/crud/system/persistent_logs_crud.py`
-- `/home/runner/work/database-service/database-service/src/models/tables/system/persistent_logs.py`
-- `/home/runner/work/database-service/database-service/src/services/logging.py`
+Concrete examples:
+- tools/tests/live_system_api_test.py
 
 ---
 
-## 8) Supply Chain & Dependency Security
+### 8. Operational Security
 
-**Score: 4/10**
+Score: 4/10
 
-### What Is Done Well
+What is done well:
+- Backup and healthcheck processes exist.
+- Some secret hardening checks are enforced for non-development operation.
 
-- Runtime dependencies are pinned to explicit versions.
-- Dependency set is relatively compact.
+What is below industry standards:
+- Auto-restore path can drop/recreate DB from backup in process.
+- Limited evidence of signed backups, immutable storage, or formal restore validation pipeline.
 
-### What Is Below Industry Standards
+What a senior security engineer would likely change:
+- Require cryptographic integrity checks and controlled promotion before restore.
+- Implement audited incident-response runbooks and recovery drills.
 
-- No lockfile with hashes, SBOM, or signed provenance workflow is visible.
-- No dependency vulnerability scanning pipeline is defined in-repo.
-- No automated update cadence/security patch governance is documented.
+How serious this is:
+- Critical for disaster scenarios.
 
-### What a Senior Security Engineer Would Likely Change
-
-- Add dependency vulnerability scanning and policy gates in CI.
-- Generate SBOM and enforce package integrity verification.
-- Define patch SLAs and dependency review process.
-
-### Seriousness
-
-- **High** over time without governance.
-
-### Concrete Examples
-
-- `/home/runner/work/database-service/database-service/requirements.txt`
-- `/home/runner/work/database-service/database-service/README.md`
+Concrete examples:
+- src/services/system/dbhealthcheck.py
+- src/services/system/backup.py
 
 ---
 
-## 9) Security Testing & Assurance
+## Top 10 Cybersecurity Strengths
 
-**Score: 1/10**
-
-### What Is Done Well
-
-- Security-relevant logic is modular enough to be testable once a harness is added.
-
-### What Is Below Industry Standards
-
-- No automated unit, integration, abuse, or regression tests detected.
-- No CI gates enforcing security invariants across authentication/authorization flows.
-- No repeatable validation for key attack paths (auth bypass, replay, limiter bypass, proxy spoofing).
-
-### What a Senior Security Engineer Would Likely Change
-
-- Build immediate security test baseline for authn/authz/session/abuse controls.
-- Add CI checks for security regressions and dependency CVEs.
-- Add targeted threat-model-based tests for high-risk paths.
-
-### Seriousness
-
-- **Critical**.
-
-### Concrete Examples
-
-- `tools/tests/live_system_api_test.py` exists, but no `pytest`-style security regression suite is present.
-- No security test pipeline definitions detected in repository.
-
----
-
-## Top 10 Security Strengths
-
-1. API key and cookie token storage is hash-based.
+1. API keys and cookie tokens are stored as hashes.
 2. Password hashing uses PBKDF2 with salt and configurable iterations.
-3. Constant-time comparison is used for secret/hash checks.
-4. Non-development mode enforces strong-secret defaults at startup.
-5. Permission-level checks are explicit on admin routes.
-6. Cookie tokens are validated against server-side DB state (not JWT-only trust).
-7. Revocation/expiry lifecycle exists for auth cookies.
-8. Abuse events are logged persistently for forensic visibility.
-9. Most CRUD database operations use ORM query composition.
-10. Security logic is concentrated in dedicated modules, aiding auditability.
+3. Non-development secret safety enforcement exists.
+4. Authorization checks are explicit in decorator layers.
+5. Redis-backed token bucket limiter supports atomicity.
+6. IP-based temporary blocking exists.
+7. Security logging coverage is broad.
+8. Distinct modules for auth, token, and abuse controls improve auditability.
+9. Configurable security thresholds exist for multiple controls.
+10. Security concerns are not buried in route handlers; they are centralized enough to improve maintainability.
 
-## Top 10 Security Weaknesses
+## Top 10 Cybersecurity Weaknesses
 
-1. No automated security/regression test suite.
-2. API-key delete/update invalidation currently has short stale-cache race windows (pending fix).
-3. Custom JWT/session implementation increases security maintenance burden.
-4. Missing explicit CSRF strategy for cookie-authenticated flows.
-5. Proxy/IP trust model is not hardened for reverse-proxy deployments.
-6. No explicit in-app edge security middleware policy (host/HTTPS/CORS).
-7. Some operational SQL/command paths still rely on interpolated config values.
-8. No visible dependency vulnerability scanning/SBOM governance.
-9. Development defaults can be insecure if operational mode is misconfigured.
-10. Incident detection/alerting infrastructure is not defined in-repo.
-
----
-
-## Biggest Concerns
-
-### Biggest Practical Exploitation Concern
-
-Concurrent requests can exploit a short post-delete/post-update window where stale in-memory key state may still authorize briefly before invalidation completes.
-
-### Biggest Design-Risk Concern
-
-Security-critical authentication/session behavior is custom-built and currently lacks a robust automated regression harness.
-
-### Biggest Operational Security Concern
-
-Edge/proxy trust and transport assumptions are not codified strongly enough for internet-facing production environments.
+1. Custom JWT implementation in critical auth path.
+2. Limited security-focused automated testing.
+3. Deployment-sensitive trust assumptions for client IP resolution.
+4. Mixed local/Redis state can lead to inconsistent enforcement across instances.
+5. Auth path DB logging can be exploited for load amplification.
+6. Recovery mechanism includes destructive operations with insufficient verification rigor.
+7. No visible secret manager/KMS integration.
+8. Limited explicit policy for key/session rotation.
+9. Dependency security gate visibility is low.
+10. Security observability maturity (metrics/alerts/tracing) is not evident.
 
 ---
 
-## Recommended Priority Order (Cybersecurity ROI)
+## Biggest Security Concern
 
-1. Add automated security tests and CI security gates for auth/session/abuse paths.
-2. Implement atomic API-key invalidation semantics on delete/update and add regression tests for stale-cache races.
-3. Harden session model (JWT/cookie/CSRF strategy) with standardized primitives.
-4. Enforce transport/edge middleware policy and deployment security contract.
-5. Add dependency governance (vuln scanning, SBOM, patch process).
+Custom implementation of core authentication token logic and surrounding checks, where a hardened standard library/framework pattern would significantly reduce risk.
 
----
+## Most Urgent Security Actions
 
-## Security Capacity Estimate (Abuse-Control Perspective)
-
-### Assumptions
-
-- Redis is healthy and reachable with low latency from API instances.
-- PostgreSQL remains available for auth/session lookups.
-- Current architecture and defaults are unchanged.
-
-### Estimated Safe Operating Envelope
-
-- Per API instance, sustained authenticated traffic is typically safe around **80-180 requests/second**.
-- For login-heavy traffic, safe sustained rate is lower: around **10-30 attempts/second** per API instance.
-- With proper multi-instance scaling and healthy Redis, total throughput scales close to linearly until DB becomes the limiting factor.
-
-### Abuse-Control Caveat
-
-- These estimates assume the pending API-key lifecycle race fix is implemented. Until then, short-lived stale-cache acceptance windows can exist under concurrent delete/update events.
+1. Replace custom JWT implementation with vetted library and strict claim validation policy.
+2. Add security regression tests (token tampering, replay, authz escalation, proxy spoofing).
+3. Harden trusted proxy/IP extraction with explicit deployment rules and validation tests.
+4. Decouple persistent security logging from synchronous auth critical path.
+5. Move destructive DB recovery out of runtime auto-path into operator-controlled workflow.
 
 ---
 
-## Overall Cybersecurity Maturity Reflected by This Codebase
+## Security Maturity Estimate
 
-**Developing / mid-level security maturity**.
+Current maturity: Mid-level security awareness, not production-hardened.
 
-Rationale:
-
-- The service shows clear intent and several correct foundational security controls.
-- The largest risks are systems-level hardening gaps (testing, distributed-control robustness, and edge security policy), not complete absence of security design.
+Reasoning:
+- There is clear intent and real security controls in place.
+- However, risk is elevated by custom security primitives, incomplete test rigor, and operational recovery/security controls that are not yet enterprise-grade.

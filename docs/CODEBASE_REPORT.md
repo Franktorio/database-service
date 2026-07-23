@@ -1,470 +1,346 @@
-# Full Codebase Engineering Evaluation
+# Codebase Engineering Report
 
-## Report Metadata
+Date: 2026-07-23
+Scope: Whole-project engineering assessment against modern industry standards.
 
-- Date: 2026-07-23
-- Scope: whole-project engineering assessment against modern industry standards
-- Basis: current main branch in this workspace
-- Method: static code review plus targeted async/rate-limit control-flow review across security and background services
-- Testing status: one live end-to-end API script detected; no unit/integration harness or CI gates detected
+## Executive Summary
 
-## Executive Verdict
+Overall, this is strong mid-level backend engineering work with clear architecture intent and practical operations support. It is not yet production-grade by strict industry standards. The largest gaps are in test depth, transaction/operational rigor, and security hardening for multi-instance production deployments.
 
-This codebase is **mid-level quality (improving)** with stronger operational and security foundations than the previous revision, but it is **still not production-grade** by modern industry standards.
-
-Primary reasons:
-
-- Architecture and security controls have improved materially (Redis-backed rate limiting, trusted proxy configuration path, more explicit role handling).
-- Reliability/testing/operability maturity still lags (no automated CI test gate, daemon-thread workers, migration/recovery rigor gaps).
-- API-key lifecycle invalidation still has short race windows after delete/update (pending fix), which can briefly preserve stale authorization/rate-limit state under concurrency.
+Overall score: 5.4/10
 
 ---
 
-## 1) Project Architecture
+## 1. Project Architecture
 
-**Score: 6.5/10**
+Score: 6/10
 
-### What Is Done Well
+What is done well:
+- The repository is cleanly separated into API, models/CRUD, security, services, tools, and docs.
+- Startup readiness gating is present via DB ready signaling before service loops start.
+- Route families are modularized by domain under API endpoint packages.
 
-- Layering remains clear: API, security, models/CRUD, services, tools.
-- Route families are modular and consistently grouped by domain.
-- Startup readiness gating (`DBReadySignal`) still prevents startup races.
-- Abuse-control request counters are now Redis-backed via shared keys.
+What is below industry standards:
+- Security and ratelimit state ownership is split between process-local memory and Redis.
+- Threaded background services are embedded in the API process, increasing lifecycle complexity.
+- Cross-cutting concerns (auth, logging, persistence side-effects) are tightly coupled.
 
-### What Is Below Industry Standards
+What a senior engineer would likely change:
+- Move background jobs to isolated worker processes/services.
+- Consolidate ephemeral state into a single shared backend for horizontal scale correctness.
+- Introduce explicit application service boundaries and unit-of-work transaction orchestration.
 
-- Background tasks still run as daemon threads inside the API process.
-- Local process caches still hold resolver objects and some block metadata.
-- Core behavior is still decorator/global-state centric rather than dependency-injected services.
+How serious this is:
+- Medium to high. It will become fragile with scale and multi-instance deployments.
 
-### What a Senior Engineer Would Likely Change
-
-- Move background jobs to supervised workers (or orchestrated jobs).
-- Keep Redis-backed controls, but consolidate remaining local block metadata into shared state where consistency matters.
-- Introduce stronger dependency injection boundaries (auth provider, limiter provider, storage provider).
-
-### Seriousness
-
-- **Medium-high** for horizontal scaling and operability.
-- **Medium** for a single-node internal service.
-
-### Concrete Examples
-
-- `main.py`
-- `src/services/service_layer.py`
-- `src/security/api_security.py`
-- `src/security/cookie_security.py`
-- `src/security/ip_block.py`
-- `src/services/system/cache/redis/client.py`
+Concrete examples:
+- main.py startup orchestration and shared DBReadySignal.
+- src/api/app.py lifespan DB init plus signal handling.
+- src/security/api_security.py in-memory limiter cache plus Redis-backed limiter state.
 
 ---
 
-## 2) Code Quality
+## 2. Code Quality
 
-**Score: 6.5/10**
+Score: 6/10
 
-### What Is Done Well
+What is done well:
+- Readable names and mostly clear intent.
+- Type hints are widely used.
+- CRUD interfaces are consistent in accepting optional sessions.
 
-- Readability is generally good; names usually communicate intent.
-- Role model and endpoint payload contracts are clearer than before.
-- Error handling around Redis availability is explicit and user-facing.
+What is below industry standards:
+- High repetition of session/commit/close patterns.
+- Duplicated auth/logging patterns across security modules.
+- Some comments explain mechanics rather than design rationale.
 
-### What Is Below Industry Standards
+What a senior engineer would likely change:
+- Introduce shared CRUD/session helper abstractions.
+- Centralize auth failure/success logging semantics.
+- Add strict linting/type checking and style gates in CI.
 
-- Transaction composition remains inconsistent in CRUD helpers.
-- Cross-cutting side effects (auth + persistent logs + limiter behavior) remain embedded in decorators.
-- No visible lint/type/test CI quality gate in-repo.
+How serious this is:
+- Medium. Primarily maintainability and defect-prevention impact.
 
-### What a Senior Engineer Would Likely Change
-
-- Add standard quality toolchain (`ruff`, `mypy`, formatter/import sorter, CI gates).
-- Refactor side-effect-heavy auth flows into explicit service methods with unit-test seams.
-- Normalize error response envelopes and HTTP semantics across all endpoints.
-
-### Seriousness
-
-- **Medium** now; tends to become **high** as complexity increases.
-
-### Concrete Examples
-
-- `src/models/crud/system/user_crud.py`
-- `src/security/cookie_security.py`
-- `src/security/password_security.py`
-- `src/services/system/cache/ratelimitcache.py`
+Concrete examples:
+- Repeated session lifecycle code in:
+  - src/models/crud/system/user_crud.py
+  - src/models/crud/system/api_key_crud.py
+  - src/models/crud/system/auth_cookie_crud.py
+  - src/models/crud/system/persistent_logs_crud.py
 
 ---
 
-## 3) Database Design
+## 3. Database Design
 
-**Score: 6/10**
+Score: 6/10
 
-### What Is Done Well
+What is done well:
+- Core schema is straightforward and purpose-fit for admin/auth operations.
+- Useful indexes exist for key lookup and time-based retrieval.
+- Async SQLAlchemy setup is clean and understandable.
 
-- Small, understandable schema with practical index coverage.
-- Async SQLAlchemy usage is coherent and modern.
-- Core uniqueness constraints for key lookups are present.
+What is below industry standards:
+- No formal migration framework/revision history.
+- Missing relational integrity constraints for some auth data relationships.
+- NullPool in runtime path increases connect/disconnect overhead.
 
-### What Is Below Industry Standards
+What a senior engineer would likely change:
+- Adopt Alembic with versioned migrations and rollback strategy.
+- Add stronger FK/check constraints where appropriate.
+- Use a production pool strategy with measured tuning.
 
-- Some relationships are enforced in code, not at DB constraint level.
-- Migration strategy is still copy-and-swap compatibility logic, not revisioned migrations.
-- `NullPool` remains global for DB traffic and may become a throughput limiter.
-- DSN credentials are still interpolated directly (special-character parsing risk).
+How serious this is:
+- High for long-term correctness and scalability.
 
-### What a Senior Engineer Would Likely Change
-
-- Add/strengthen FK/check constraints where invariants require hard guarantees.
-- Adopt deterministic migration framework with schema version history.
-- Reevaluate pooling strategy for production load patterns.
-- Build DB URL safely with proper encoding/URL object builders.
-
-### Seriousness
-
-- **Medium-high** for production growth and schema evolution safety.
-
-### Concrete Examples
-
-- `src/models/tables/system/auth_cookie_table.py`
-- `src/models/database.py`
-- `config/loader.py`
-- `tools/scripts/migrate_db.py`
+Concrete examples:
+- src/models/database.py uses NullPool.
+- tools/scripts/migrate_db.py uses copy/swap strategy that can silently skip incompatible columns.
+- src/models/tables/system/auth_cookie_table.py stores username without FK enforcement.
 
 ---
 
-## 4) API Design
+## 4. API Design
 
-**Score: 6.5/10**
+Score: 6/10
 
-### What Is Done Well
+What is done well:
+- Route groups and authentication decorators are clear.
+- Status code usage is mostly reasonable.
+- Request payload modeling is present in endpoint packages.
 
-- Endpoint organization is clean and consistent.
-- Validation covers many high-value admin payload fields.
-- Permission model is explicit and centralized.
-- API-key transport has clean Bearer-header handling.
+What is below industry standards:
+- Some endpoint names are action-oriented rather than clean resource semantics.
+- Response contracts are not fully standardized across surfaces.
+- Test endpoints are mixed into production app routing.
 
-### What Is Below Industry Standards
+What a senior engineer would likely change:
+- Normalize endpoint naming/verbs around resources and idempotency.
+- Standardize error and success envelope shape.
+- Gate test/debug routes by environment or separate app profile.
 
-- Error shape consistency still varies across routes.
-- Some endpoint semantics are still operational RPC-style rather than strongly resource-oriented REST.
-- API contract governance (versioning, deprecation policy, OpenAPI checks) is still informal.
+How serious this is:
+- Medium.
 
-### What a Senior Engineer Would Likely Change
-
-- Standardize error envelope and status semantics.
-- Add API versioning conventions and OpenAPI contract checks in CI.
-- Add explicit compatibility rules for response fields.
-
-### Seriousness
-
-- **Medium**.
-
-### Concrete Examples
-
-- `docs/API.md`
-- `src/api/app.py`
-- `src/api/system/api_db_endpoints/routes/_get_routes.py`
-- `src/api/system/user_db_endpoints/routes/_patch_routes.py`
+Concrete examples:
+- src/api/app.py includes /api-auth-test and /login-auth-test in primary app surface.
+- src/api/system/*/routes folder organization is good, but semantics are partially RPC-like.
 
 ---
 
-## 5) Security
+## 5. Security
 
-**Score: 6/10**
+Score: 5/10
 
-### What Is Done Well
-
+What is done well:
 - API keys and cookie tokens are stored as hashes.
 - Password hashing uses PBKDF2 with salt and configurable iterations.
-- Non-development mode enforces stronger secret-default safety including Redis password checks.
-- Permission checks are explicit and understandable.
-- Trusted proxy configuration path now exists (`TRUSTED_PROXIES`, `forwarded_allow_ips`).
+- Non-development mode enforces non-default secrets.
 
-### What Is Below Industry Standards
+What is below industry standards:
+- Custom JWT implementation increases maintenance and validation risk.
+- Proxy/IP trust handling can be unsafe if infra trust boundaries are misconfigured.
+- Security policy depth is limited (rotation strategy, advanced session controls, and abuse analytics).
 
-- Security-critical auth/session behavior is still custom and needs deeper verification coverage.
-- IP temporary block metadata remains process-local even though limiter counters are Redis-backed.
-- Redis availability is now a hard dependency for protected auth flows (503 on outage).
+What a senior engineer would likely change:
+- Replace custom JWT implementation with vetted library and strict claim verification policy.
+- Harden trusted proxy handling with explicit deployment profile and tests.
+- Add key/session rotation policies and security regression test coverage.
 
-### What a Senior Engineer Would Likely Change
+How serious this is:
+- High.
 
-- Keep header-only secret transport and expand to explicit edge hardening middleware.
-- Add distributed block-state consistency where needed.
-- Add security-focused regression and abuse-path tests.
-- Evaluate replacing custom JWT/session implementation with hardened library primitives.
-
-### Seriousness
-
-- **High**.
-
-### Concrete Examples
-
-- `src/security/tokens.py`
-- `src/security/api_security.py`
-- `src/security/ratelimit.py`
-- `src/security/ip_block.py`
-- `src/services/system/cache/redis/client.py`
+Concrete examples:
+- src/security/tokens.py custom JWT encode/decode/signing.
+- src/security/ip_block.py trusts forwarded headers for configured proxies.
+- config/loader.py blocks unsafe defaults only outside development mode.
 
 ---
 
-## 6) Reliability
+## 6. Reliability
 
-**Score: 5.5/10**
+Score: 5/10
 
-### What Is Done Well
+What is done well:
+- Healthcheck and backup services exist and are configurable.
+- Best-effort persistent logging avoids total request failure when logging persistence fails.
+- Redis outages in limiter paths are explicitly surfaced as service unavailable.
 
-- Healthcheck and backup services are present and configurable.
-- Persistent auth/abuse logging supports incident forensics.
-- Startup DB readiness gating materially improves startup correctness.
-- Cache-cleanup worker loops now use async sleeps and awaitable cleanup paths instead of blocking sleep calls inside async code.
+What is below industry standards:
+- Runtime auto-restore can trigger destructive DB operations.
+- Recovery path lacks robust backup integrity verification before destructive steps.
+- Exception handling is broad in places, which can reduce diagnosability.
 
-### What Is Below Industry Standards
+What a senior engineer would likely change:
+- Move destructive restore to operator-controlled runbook path.
+- Add layered pre-restore validation and immutable backup integrity checks.
+- Add failure-mode tests for degraded dependencies.
 
-- Recovery/restore path can still be destructive if backup quality is poor.
-- Daemon-thread background services remain unsupervised worker architecture.
-- Redis dependency introduces additional outage modes for auth-protected routes.
-- API-key delete/update invalidation is not atomic with request authorization checks, leaving short stale-cache race windows.
+How serious this is:
+- High.
 
-### What a Senior Engineer Would Likely Change
-
-- Strengthen restore safety with deeper backup validation and safer failure modes.
-- Add resilience behavior for transient Redis outages where policy allows degraded mode.
-- Introduce process supervision and explicit worker failure handling.
-
-### Seriousness
-
-- **High** for failure conditions.
-
-### Concrete Examples
-
-- `src/services/system/dbhealthcheck.py`
-- `src/services/system/backup.py`
-- `src/security/ratelimit.py`
-- `src/services/system/cache/ratelimitcache.py`
+Concrete examples:
+- src/services/system/dbhealthcheck.py restore_from_backup path drops and recreates DB.
+- src/services/system/backup.py relies on subprocess success without replay verification.
 
 ---
 
-## 7) Performance
+## 7. Performance
 
-**Score: 5.5/10**
+Score: 5/10
 
-### What Is Done Well
+What is done well:
+- Redis-backed token bucket with Lua script is a strong direction for atomic limiting.
+- Basic indexing aligns with common retrieval paths.
 
-- Query patterns are mostly simple and indexed.
-- Async stack is used consistently across API and DB layers.
-- Shared Redis limiter state improves multi-instance fairness versus process-local counters.
-- Redis Lua-based limiter updates remove non-atomic get/set races that could otherwise allow rate-limit overshoot under concurrency.
+What is below industry standards:
+- NullPool adds connection churn under load.
+- Frequent persistent log writes on auth paths can amplify latency and DB pressure.
+- Mixed local cache + shared store patterns complicate predictable scaling behavior.
 
-### What Is Below Industry Standards
+What a senior engineer would likely change:
+- Tune pooled DB connections and benchmark auth endpoints under concurrency.
+- Decouple security/audit logging from synchronous request paths where feasible.
+- Add profiling and SLO-based optimization targets.
 
-- `NullPool` still forces frequent DB connection churn.
-- Auth flows often involve multiple DB reads/writes plus Redis traffic.
-- Cookie/session validation remains DB-coupled for revocation checks on hot paths.
-- Per-request Redis roundtrips in auth paths add overhead without local short-circuit fallback for outage/degraded operation.
+How serious this is:
+- Medium to high under real traffic.
 
-### What a Senior Engineer Would Likely Change
-
-- Tune DB pooling strategy for expected traffic.
-- Rebalance auth-path DB writes (for example, selective logging/sampling where acceptable).
-- Add baseline performance SLOs and benchmark harness.
-
-### Seriousness
-
-- **Medium-high** under growth; **medium** at current likely traffic.
-
-### Concrete Examples
-
-- `src/models/database.py`
-- `src/security/cookie_security.py`
-- `src/security/password_security.py`
-- `src/security/ratelimit.py`
+Concrete examples:
+- src/models/database.py poolclass=NullPool.
+- src/security/api_security.py and src/security/password_security.py call persistent DB logging on many auth outcomes.
 
 ---
 
-## 8) Testing
+## 8. Testing
 
-**Score: 3/10**
+Score: 3/10
 
-### What Is Done Well
+What is done well:
+- There is an end-to-end live API test covering core routes.
 
-- A live end-to-end system API script now exists and covers all currently exposed admin/test routes.
-- The test flow includes both positive and negative auth scenarios (rate limit, password rotate, cookie invalidation).
+What is below industry standards:
+- Minimal unit and integration test depth.
+- Little evidence of isolated deterministic testing.
+- No visible CI quality gate coverage (type/lint/unit/security tests).
 
-### What Is Below Industry Standards
+What a senior engineer would likely change:
+- Build pytest suite with layered unit/integration/security tests.
+- Add DB/Redis test fixtures and isolated environments.
+- Enforce merge gates on coverage and critical-path tests.
 
-- No unit test suite detected.
-- No structured integration-test harness (`pytest` fixtures, isolated DB lifecycle) detected.
-- No CI quality gates enforcing tests.
+How serious this is:
+- High. This is the largest immediate engineering risk.
 
-### What a Senior Engineer Would Likely Change
-
-- Convert live script coverage into repeatable automated suite (`pytest` + fixtures + CI).
-- Add unit tests around security-critical modules (tokens, limiters, decorators).
-- Add failure-mode tests for backup/healthcheck/restore logic.
-
-### Seriousness
-
-- **Critical**.
-
-### Concrete Examples
-
-- `tools/tests/live_system_api_test.py`
-- No `pytest.ini` or `conftest.py` detected.
-- No CI pipeline configuration detected in repository.
+Concrete examples:
+- tools/tests/live_system_api_test.py is present, but broad test matrix is absent.
 
 ---
 
-## 9) Production Readiness
+## 9. Production Readiness
 
-**Score: 5/10**
+Score: 4/10
 
-### What Is Done Well
-
+What is done well:
 - Environment-driven configuration exists.
-- Rotating file + console logging exists.
-- Backup, healthcheck, and Redis setup tooling are present.
+- Backup/healthcheck/process utilities are present.
+- Documentation quality is above average for project size.
 
-### What Is Below Industry Standards
+What is below industry standards:
+- Deployment model appears primarily single-node/manual.
+- Missing visible CI/CD pipeline, observability standards, and progressive release practices.
+- Destructive restore automation in runtime process is a major production risk.
 
-- No visible CI/CD deployment pipeline definitions.
-- No metrics/tracing/alerting stack.
-- No explicit SLO/runbook/incident-response artifacts.
-- Recovery tooling exists but still needs stronger safety guarantees.
+What a senior engineer would likely change:
+- Add staged deployment pipeline and rollback controls.
+- Add metrics/tracing/alerting and operational SLOs.
+- Implement safer disaster recovery workflows with drill cadence.
 
-### What a Senior Engineer Would Likely Change
+How serious this is:
+- High.
 
-- Add staged deployment pipeline with rollback support.
-- Add telemetry stack (metrics, traces, alerting) and operational dashboards.
-- Formalize production runbooks, DR drills, and Redis outage procedures.
-
-### Seriousness
-
-- **High** if used as a production service.
-
-### Concrete Examples
-
-- `config/service_config.json`
-- `src/services/system/logging.py`
-- `tools/scripts/setup_postgres.py`
-- `tools/scripts/setup_redis.py`
+Concrete examples:
+- Operational scripts in tools/scripts/*.py.
+- Runtime recovery logic in src/services/system/dbhealthcheck.py.
 
 ---
 
-## 10) Professional Engineering Standards
+## 10. Professional Engineering Standards
 
-**Score: 6.5/10**
+Score: 6/10
 
-### Classification
+Level estimate:
+- Mid-level (with strong practical instincts and some senior-leaning decisions).
 
-- **Overall level reflected: Mid-level (trending upward)**
-
-### Why
-
-Signals of stronger engineering judgment:
-
-- Clear modular decomposition.
-- Practical secure defaults including Redis secret enforcement.
-- Material architecture improvement by moving limiter counters to Redis.
-- Better documentation and presence of a full live API validation script.
-
-Signals preventing senior/production-grade classification:
-
-- Missing disciplined automated test pyramid and CI gates.
-- Operational hardening gaps (migrations, observability, recovery rigor).
-- Security-critical custom auth/session logic still lacks deep regression coverage.
-
----
-
-## 11) Estimated Capacity (Current Architecture)
-
-**Score: 5.5/10 (capacity planning maturity)**
-
-### Assumptions
-
-- Single API instance, one PostgreSQL instance, one Redis instance in the same region/VPC.
-- Typical cloud sizing around 2 vCPU / 4 GB RAM for API process.
-- Current config preserved (`NullPool`, DB-backed auth checks, persistent security logging).
-- Mix includes authenticated read endpoints plus occasional login and admin writes.
-
-### Estimated Throughput
-
-- Steady authenticated API traffic (API key or cookie auth): about **80-180 requests/second** per API instance before latency rises sharply.
-- Login/password-heavy traffic: about **10-30 login attempts/second** per API instance due to password hashing and DB touches.
-- Mixed workload (mostly reads, some auth writes): about **60-140 requests/second** per API instance at stable behavior.
-
-### Estimated Concurrent Users
-
-- Light usage (one request every 10-20s): about **700-2,500 concurrent users** per API instance.
-- Moderate usage (one request every 3-5s): about **180-700 concurrent users** per API instance.
-- Burst-heavy usage with tighter latency expectations: about **100-300 concurrent users** per API instance.
-
-### Scaling Notes
-
-- Horizontal API scaling can increase aggregate capacity near-linearly for stateless paths, but DB and Redis become shared bottlenecks quickly.
-- Replacing `NullPool`, reducing synchronous auth-path writes, and adding dedicated worker supervision can often improve practical capacity by **2x-4x**.
+Signals for this conclusion:
+- Positive signals:
+  - Thoughtful module separation and security-conscious defaults.
+  - Practical operational tooling and service health logic.
+  - Typed async data access stack.
+- Limiting signals:
+  - Test strategy is underdeveloped.
+  - Some architectural choices will not hold up cleanly at scale.
+  - Security and DR hardening are not yet at production-grade rigor.
 
 ---
 
 ## Top 10 Strengths
 
-1. Clear package-level separation of concerns.
-2. Consistent API domain modularity.
-3. Async-first implementation across web and DB layers.
-4. Practical schema/index choices for current features.
-5. Hashed storage for API keys and cookie identifiers.
-6. Redis-backed shared rate-limit counters for API/password/cookie paths.
-7. Explicit permission-level model and checks.
-8. Configurable background operational services with startup readiness gating.
-9. Persistent auth/abuse event trail design.
-10. Live system API test script covers end-to-end flow.
+1. Clear domain-based folder architecture.
+2. Async FastAPI + SQLAlchemy integration is coherent.
+3. Redis atomic token-bucket limiter design.
+4. Strong basic credential handling (hashing + pepper).
+5. Non-dev secret safety enforcement.
+6. Sensible indexing for key access paths.
+7. Startup readiness sequencing.
+8. Built-in backup and healthcheck operational support.
+9. Consistent CRUD surface ergonomics.
+10. Strong documentation coverage for a compact service.
 
 ## Top 10 Weaknesses
 
-1. No unit/integration test harness with CI enforcement.
-2. Migration strategy lacks revision history and deterministic evolution policy.
-3. Recovery flow still carries destructive-risk concerns.
-4. Inconsistent transaction atomicity in composed CRUD flows.
-5. `NullPool` strategy without demonstrated load validation.
-6. Limited production observability stack.
-7. Daemon-thread operational jobs instead of supervised workers.
-8. Security-critical custom logic without deep regression harness.
-9. API-key delete/update invalidation has short stale-cache race windows (pending implementation fix).
-10. Redis outage behavior can deny protected traffic (503) without graceful fallback.
+1. Limited automated test coverage depth.
+2. NullPool runtime DB strategy.
+3. Destructive runtime auto-restore design risk.
+4. Transaction atomicity concerns due to nested helper commits.
+5. Mixed local/Redis state consistency hazards.
+6. Custom JWT implementation burden and risk.
+7. API semantics partially RPC-style.
+8. Synchronous persistent logging on critical auth paths.
+9. Migration strategy lacks formal revisioning guarantees.
+10. Production deployment/observability maturity gap.
 
 ---
 
-## Biggest Concerns
+## Biggest Architectural Concern
 
-### Biggest Architectural Concern
+State and lifecycle consistency across mixed execution models: async API handlers, daemon threads, in-memory caches, and shared Redis state. This creates hidden correctness and operability risks as soon as horizontal scaling or multi-worker deployment is introduced.
 
-Operational services and security control paths still rely on in-process daemon threads and local coordination, which limits supervision and resilience under scale/failure.
+## Biggest Security Concern
 
-### Biggest Security Concern
+Custom JWT and security-critical flow implementation rather than using hardened, battle-tested framework patterns, combined with deployment-sensitive proxy trust assumptions.
 
-Authentication/session stack is custom and tightly coupled to persistence and limiter infrastructure, and API-key lifecycle invalidation still has short stale-cache race windows pending an atomic invalidation strategy.
+## Biggest Scalability Concern
 
-### Biggest Scalability Concern
-
-`NullPool` DB strategy and write-heavy auth telemetry patterns can become throughput bottlenecks before core business logic does.
+Connection churn (NullPool) plus synchronous DB writes on auth-heavy request paths can create avoidable bottlenecks and outage amplification under load.
 
 ---
 
-## Developer Skill Focus (Highest ROI Next)
+## Skills To Focus On Next
 
-1. Test engineering for backend reliability (unit + integration + failure-mode testing).
-2. Production operations (CI/CD, observability, runbooks, incident drills).
-3. Transactional consistency and migration discipline.
-4. Performance engineering (pooling, profiling, load testing).
-5. Security architecture hardening (session primitives, threat-model regression tests).
+1. Test architecture and CI quality gates (unit/integration/security regression testing).
+2. Transaction design and explicit unit-of-work patterns.
+3. Production security hardening (auth libraries, threat modeling, trust boundaries).
+4. Reliability engineering and disaster recovery safety practices.
+5. Performance engineering (pool tuning, profiling, capacity planning).
 
 ---
 
-## Estimated Engineering Level Reflected by This Codebase
+## Final Engineering Level Estimate
 
-**Mid-level (improving trajectory)**.
+Estimated level reflected by this codebase: Mid-level.
 
 Rationale:
-
-- Shows solid implementation ability, clear structure, and practical security-minded intent.
-- Demonstrates recent meaningful architecture improvement (shared Redis limiter state).
-- Still lacks the reliability/operability guardrails expected in senior-owned production systems.
-
+- Strong implementation discipline and modular organization are evident.
+- Practical operational concerns have been addressed beyond beginner scope.
+- The major gap is production rigor: testing depth, safe failure handling, and scalable architecture patterns expected for senior-grade systems.
