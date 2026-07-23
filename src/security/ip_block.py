@@ -19,10 +19,10 @@ from config.loader import (
     IP_BLOCKING_DURATION,
     TRUSTED_PROXIES,
 )
+from src.services.system.cache.redis.client import RedisClient
 from src.services.system.logging import log_message
 
 _ip_requests: dict[str, RateLimit] = {}  # Maps IP addresses to a RateLimit object that tracks the number of requests and the time window.
-_blocked_until_by_ip: dict[str, float] = {}
 _last_seen_by_ip: dict[str, float] = {}
 _ip_lock = threading.Lock()  # A lock to synchronize access to the _ip_requests dictionary.
 
@@ -94,16 +94,6 @@ def cleanup_inactive_ip_blocks(max_inactive_seconds: int) -> int:
             _last_seen_by_ip.pop(ip, None)
             if _ip_requests.pop(ip, None) is not None:
                 removed += 1
-            _blocked_until_by_ip.pop(ip, None)
-
-        expired_blocks = [
-            ip
-            for ip, blocked_until in _blocked_until_by_ip.items()
-            if blocked_until <= now
-        ]
-        for ip in expired_blocks:
-            _blocked_until_by_ip.pop(ip, None)
-
     return removed
 
 
@@ -123,14 +113,20 @@ def with_ip_block(func):
         blocked_retry_after: float | None = None
         newly_blocked = False
 
-        with _ip_lock:
-            blocked_until = _blocked_until_by_ip.get(ip_address, 0.0)
-            if blocked_until > now:
-                blocked_retry_after = blocked_until - now
-                limiter = None
-            else:
-                limiter = _get_or_create_ip_ratelimit(ip_address)
-                _last_seen_by_ip[ip_address] = now
+        blocked_until = await RedisClient.get(f"ip_block:{ip_address}")
+        if blocked_until is not None:
+            try:
+                blocked_until_time = float(blocked_until)
+                if blocked_until_time > now:
+                    blocked_retry_after = blocked_until_time - now
+            except ValueError:
+                log_message(f"[WARNING] [IP BLOCK] Invalid blocked_until value for IP {ip_address}: {blocked_until}")
+                blocked_retry_after = float(IP_BLOCKING_DURATION)
+                pass
+            limiter = None
+        else:
+            limiter = _get_or_create_ip_ratelimit(ip_address)
+            
 
         if blocked_retry_after is None and limiter is not None:
             try:
@@ -145,10 +141,9 @@ def with_ip_block(func):
                 raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
 
             if not allowed:
-                with _ip_lock:
-                    _blocked_until_by_ip[ip_address] = time.time() + IP_BLOCKING_DURATION
                 newly_blocked = True
                 blocked_retry_after = float(IP_BLOCKING_DURATION)
+                await RedisClient.set(f"ip_block:{ip_address}", f"{time.time() + IP_BLOCKING_DURATION}", expire=IP_BLOCKING_DURATION)
 
         if blocked_retry_after is not None:
             if newly_blocked:
