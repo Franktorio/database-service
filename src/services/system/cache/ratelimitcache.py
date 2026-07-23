@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import threading
 
 from config.loader import PROJECT_ROOT
 from src.security.api_security import cleanup_inactive_ratelimiters
@@ -55,29 +54,12 @@ async def _ratelimit_cache_loop() -> None:
             )
         await asyncio.sleep(RATELIMIT_CACHE_SWEEP_INTERVAL)
 
-
-async def _wait_for_db_ready(db_ready_signal) -> None:
-    while True:
-        if db_ready_signal.is_ready():
-            break
-        await asyncio.sleep(1)
+def is_ratelimit_cache_service_enabled() -> bool:
+    return RATELIMIT_CACHE_SERVICE_ENABLED
 
 
-async def _wait_for_db_ready_and_start(db_ready_signal) -> None:
-    log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting ratelimit cache loop.")
-    await _wait_for_db_ready(db_ready_signal)
-    log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting ratelimit cache loop.")
-    await _ratelimit_cache_loop()
-
-
-def start_ratelimit_cache_service(db_ready_signal=None) -> None:
+async def ratelimit_cache_service_loop() -> None:
     if not RATELIMIT_CACHE_SERVICE_ENABLED:
         log_message(f"[INFO] [{PRINT_PREFIX}] Ratelimit cache cleanup service is disabled.")
         return
-
-    log_message(f"[INFO] [{PRINT_PREFIX}] Starting ratelimit cache cleanup service...")
-    thread_target = lambda: asyncio.run(_ratelimit_cache_loop())
-    if db_ready_signal is not None:
-        thread_target = lambda: asyncio.run(_wait_for_db_ready_and_start(db_ready_signal))
-    thread = threading.Thread(target=thread_target, daemon=True, name="RateLimitCacheService")
-    thread.start()
+    await _ratelimit_cache_loop()

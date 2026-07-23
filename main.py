@@ -21,10 +21,6 @@ def main():
         log_message(f"{'#' * 30}")
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting database service bootstrap.")
     from src.services.service_layer import start_backup_service
-    from src.services.service_layer import start_cookie_expiry_service
-    from src.services.service_layer import start_healthcheck_service
-    from src.services.service_layer import start_ip_block_cache_service
-    from src.services.service_layer import start_ratelimit_cache_service
     from src.api.app import start_api_server
 
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Initializing background services and database.")
@@ -32,10 +28,9 @@ def main():
     signal = DBReadySignal()
     
     start_backup_service(signal)
-    start_healthcheck_service(signal)
-    start_cookie_expiry_service(signal)
-    start_ratelimit_cache_service(signal)
-    start_ip_block_cache_service(signal)
+    log_message(
+        f"[INFO] [{PRINT_PREFIX}] Async services are managed by FastAPI lifespan tasks."
+    )
 
     start_api_server(signal) # Also starts DB; Also becomes the main event loop for the application. Sets the signal to ready when DB is ready.
     log_message(f"[INFO] [{PRINT_PREFIX}] API startup routine concluded.")

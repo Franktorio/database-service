@@ -1,5 +1,6 @@
 # ~/src/api/app.py
 
+import asyncio
 import uvicorn
 import fastapi
 from fastapi import Request
@@ -10,12 +11,31 @@ from typing import Any
 from config.loader import API_ENABLED, API_PORT, TRUSTED_PROXIES
 from src.api.system.api_db_endpoints import routes as api_db_routes
 from src.api.system.user_db_endpoints import routes as user_db_routes
+from src.services.system.cache.redis.client import RedisClient
+
+
 from src.security.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.security.password_security import auth_and_grant_token
 from src.security.cookie_security import cookie_authentication
 from src.security.tokens import get_cookie_settings
 from src.models.database import init_db, close_db
+from src.services.system.cookieexpiry import (
+    cookie_expiry_service_loop,
+    is_cookie_expiry_service_enabled,
+)
+from src.services.system.cache.ipblockcache import (
+    ip_block_cache_service_loop,
+    is_ip_block_cache_service_enabled,
+)
+from src.services.system.cache.ratelimitcache import (
+    ratelimit_cache_service_loop,
+    is_ratelimit_cache_service_enabled,
+)
+from src.services.system.dbhealthcheck import (
+    healthcheck_service_loop,
+    is_healthcheck_service_enabled,
+)
 
 from src.api.config import VIEW_LEVEL
 
@@ -32,8 +52,23 @@ TEST_DEFAULTS = {
 
 @asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):
+    background_tasks: list[asyncio.Task] = []
+
     log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan startup started.")
     await init_db()
+
+    if is_healthcheck_service_enabled():
+        background_tasks.append(asyncio.create_task(healthcheck_service_loop(), name="db-healthcheck-service"))
+    if is_cookie_expiry_service_enabled():
+        background_tasks.append(asyncio.create_task(cookie_expiry_service_loop(), name="cookie-expiry-service"))
+    if is_ratelimit_cache_service_enabled():
+        background_tasks.append(asyncio.create_task(ratelimit_cache_service_loop(), name="ratelimit-cache-service"))
+    if is_ip_block_cache_service_enabled():
+        background_tasks.append(asyncio.create_task(ip_block_cache_service_loop(), name="ip-block-cache-service"))
+
+    if background_tasks:
+        log_message(f"[INFO] [{PRINT_PREFIX}] Started {len(background_tasks)} async background task(s).")
+
     if _DB_READY_SIGNAL is not None:
         _DB_READY_SIGNAL.set_ready()
         log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal set to ready.")
@@ -42,6 +77,12 @@ async def lifespan(app: fastapi.FastAPI):
     yield # Application waits here while running, then resumes after shutdown.
 
     log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan shutdown complete... performing cleanup.")
+    for task in background_tasks:
+        task.cancel()
+    if background_tasks:
+        await asyncio.gather(*background_tasks, return_exceptions=True)
+        log_message(f"[INFO] [{PRINT_PREFIX}] Async background tasks stopped.")
+    await RedisClient.close()
     await close_db()
 
 app = fastapi.FastAPI(

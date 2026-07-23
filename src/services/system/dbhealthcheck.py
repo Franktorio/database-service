@@ -1,7 +1,6 @@
 # ~/src/services/dbhealthcheck.py
 import os
 import signal
-import threading
 import subprocess
 import asyncio
 import time
@@ -264,28 +263,12 @@ async def healthcheck_service():
                 )
                 os.kill(os.getpid(), signal.SIGINT)
 
-async def _wait_for_db_ready(db_ready_signal):
-    while True:
-        if db_ready_signal.is_ready():
-            break
-        await asyncio.sleep(1)
+def is_healthcheck_service_enabled() -> bool:
+    return HEALTHCHECK_ENABLED
 
 
-async def _wait_for_db_ready_and_start(db_ready_signal):
-    log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting healthcheck loop.")
-    await _wait_for_db_ready(db_ready_signal)
-    log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting healthcheck loop.")
-    await healthcheck_service()
-
-
-def start_healthcheck_service(db_ready_signal=None):
+async def healthcheck_service_loop() -> None:
     if not HEALTHCHECK_ENABLED:
         log_message(f"[INFO] [{PRINT_PREFIX}] Healthcheck service is disabled in configuration.")
         return
-    
-    log_message(f"[INFO] [{PRINT_PREFIX}] Starting database healthcheck service...")
-    thread_target = lambda: asyncio.run(healthcheck_service())
-    if db_ready_signal is not None:
-        thread_target = lambda: asyncio.run(_wait_for_db_ready_and_start(db_ready_signal))
-    thread = threading.Thread(target=thread_target, daemon=True, name="DBHealthCheckService")
-    thread.start()
+    await healthcheck_service()

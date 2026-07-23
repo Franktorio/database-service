@@ -39,9 +39,10 @@ Important index coverage:
 Startup flow today:
 
 1. Logging is initialized in `main.py`.
-2. Background daemon threads are started for backup, DB healthcheck, cookie expiry, IP-block cache cleanup, and API-key ratelimit cache cleanup.
+2. Backup daemon thread is started and waits for DB ready signal.
 3. Uvicorn starts the FastAPI app.
-4. During API lifespan startup, SQLAlchemy creates tables and now also creates any declared missing indexes with `checkfirst=True`.
+4. During API lifespan startup, SQLAlchemy creates tables and any declared missing indexes with `checkfirst=True`.
+5. Async service loops (DB healthcheck, cookie expiry, IP-block cache cleanup, and API-key ratelimit cache cleanup) start as FastAPI lifespan tasks on the same event loop.
 
 Primary code areas:
 
