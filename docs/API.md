@@ -46,7 +46,10 @@ Requires the configured auth cookie and returns a success payload when the cooki
 
 Base prefix: `/api/db/keys`
 
-All endpoints in this section require `SUPER_ADMIN_LEVEL`.
+Endpoints in this section have mixed authorization:
+
+- `GET /api/db/keys/` is public (IP block middleware still applies).
+- The remaining API-key administration endpoints require `SUPER_ADMIN_LEVEL`.
 
 ### `GET /api/db/keys/`
 
@@ -238,3 +241,15 @@ Request body:
 
 - API-key and cookie ratelimits are process-local.
 - Persistent logging occurs on auth success and failure paths, which adds DB dependency to control-plane traffic.
+
+## Live Test Notes
+
+The live system test suite is implemented under:
+
+- `tools/tests/live_system_api_test.py`
+
+Environment variables used by the suite:
+
+- `SYSTEM_TEST_SUPER_ADMIN_KEY` (required)
+- `API_PORT` (used to build base URL from `.env`)
+- `SYSTEM_TEST_BASE_URL` (optional override; if set, this takes precedence)

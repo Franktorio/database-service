@@ -18,6 +18,8 @@ _ratelimiters: dict[str, RateLimit] = {}
 _last_seen_by_key: dict[str, float] = {}
 _cache_lock = threading.Lock()
 
+PRINT_PREFIX = "API VALIDATE"
+
 
 def _client_ip(request: Request | None) -> str | None:
     if request is None:
@@ -68,7 +70,7 @@ def _place_in_ratelimiters(api_key: ApiKey) -> RateLimit:
     current_time = time.time()
     _ratelimiters[api_hash] = RateLimit(limit=limit, key_hash=api_hash, permission_level=level)
     _last_seen_by_key[api_hash] = current_time
-    log_message(f"[DEBUG] [API VALIDATE] Placed API key {api_hash} in rate limiters with limit {api_key.rate_limit}.")
+    log_message(f"[DEBUG] [{PRINT_PREFIX}] Placed API hash {api_hash[:12]}... in rate limiters with limit {api_key.rate_limit}.")
     return _ratelimiters[api_hash]
 
 def refresh_ratelimiter(api_object: ApiKey) -> RateLimit:
@@ -89,9 +91,9 @@ def remove_ratelimiter(api_hash: str) -> bool:
         removed = _ratelimiters.pop(api_hash, None) is not None
         _last_seen_by_key.pop(api_hash, None)
     if removed:
-        log_message(f"[DEBUG] [API VALIDATE] Removed API key {api_hash} from rate limiters.")
+        log_message(f"[DEBUG] [{PRINT_PREFIX}] Removed API hash {api_hash[:12]}... from rate limiters.")
     else:
-        log_message(f"[DEBUG] [API VALIDATE] Attempted to remove API key {api_hash} from rate limiters, but it was not found.")
+        log_message(f"[DEBUG] [{PRINT_PREFIX}] Attempted to remove API hash {api_hash[:12]}... from rate limiters, but it was not found.")
     return removed
 
 def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
@@ -111,7 +113,7 @@ def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
 
     if removed > 0:
         log_message(
-            f"[DEBUG] [API VALIDATE] Cleaned {removed} inactive ratelimiter(s) "
+            f"[DEBUG] [{PRINT_PREFIX}] Cleaned {removed} inactive ratelimiter(s) "
             f"older than {max_inactive_seconds}s."
         )
     return removed
@@ -139,7 +141,7 @@ async def _obtain_ratelimit(api_key: str, ip_address: str | None = None) -> Rate
             ip_address=ip_address,
         )
         log_message(
-            f"[WARNING] [API VALIDATE] Unknown API key attempted access. "
+            f"[WARNING] [{PRINT_PREFIX}] Unknown API key attempted access. "
             f"fingerprint={_key_fingerprint(api_key)}"
         )
         return None
@@ -184,7 +186,7 @@ def api_authentication(permission_level: int):
                     ip_address=client_ip,
                 )
                 log_message(
-                    f"[WARNING] [API VALIDATE] API key not registered. "
+                    f"[WARNING] [{PRINT_PREFIX}] API key not registered. "
                     f"fingerprint={fingerprint}"
                 )
                 raise HTTPException(status_code=403, detail="API key is not registered.")
@@ -201,7 +203,7 @@ def api_authentication(permission_level: int):
                     ip_address=client_ip,
                 )
                 log_message(
-                    f"[WARNING] [API VALIDATE] Insufficient permissions for key "
+                    f"[WARNING] [{PRINT_PREFIX}] Insufficient permissions for key "
                     f"fingerprint={fingerprint}. Required={permission_level}, Found={ratelimit.permission_level}."
                 )
                 raise HTTPException(status_code=403, detail="Insufficient permissions.")
@@ -227,7 +229,7 @@ def api_authentication(permission_level: int):
                     ip_address=client_ip,
                 )
                 log_message(
-                    f"[WARNING] [API VALIDATE] Rate limit exceeded for key "
+                    f"[WARNING] [{PRINT_PREFIX}] Rate limit exceeded for key "
                     f"fingerprint={fingerprint}. retry_after={status:.2f}s"
                 )
                 raise HTTPException(

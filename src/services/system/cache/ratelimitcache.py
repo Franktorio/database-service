@@ -33,7 +33,11 @@ def _ratelimit_cache_loop() -> None:
         f"interval={RATELIMIT_CACHE_SWEEP_INTERVAL}s max_inactive={RATELIMIT_CACHE_MAX_INACTIVE_SECONDS}s"
     )
     while True:
-        redis_healthy = asyncio.run(_redis_is_healthy())
+        try:
+            redis_healthy = asyncio.run(_redis_is_healthy())
+        except Exception as exc:
+            log_message(f"[WARNING] [{PRINT_PREFIX}] Redis health probe raised exception: {exc}")
+            redis_healthy = False
         if not redis_healthy:
             log_message(
                 f"[WARNING] [{PRINT_PREFIX}] Redis is unavailable. "

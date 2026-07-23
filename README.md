@@ -135,6 +135,27 @@ Start the service:
 python3 main.py
 ```
 
+## Live System API Test
+
+The live end-to-end system API test is folder-based and covers all current API routes:
+
+- `tools/tests/live_system_api_test.py`
+
+Required environment variable:
+
+- `SYSTEM_TEST_SUPER_ADMIN_KEY`
+
+Base URL resolution:
+
+- Uses `SYSTEM_TEST_BASE_URL` when set.
+- Otherwise builds `http://127.0.0.1:<API_PORT>` from `config/.env`.
+
+Run in current process:
+
+```bash
+python3 tools/tests/live_system_api_test.py
+```
+
 ## Current API Surface
 
 Public/test endpoints:
