@@ -11,7 +11,7 @@ PRINT_PREFIX = "GENERATE API KEY SCRIPT"
 
 # USAGE (on project root): python3 -m scripts.generate_api_key <permission_level> <rate_limit>
 
-# To make a SUPER_ADMIN key with 1000 requests per day, run:
+# To make a SUPER_ADMIN key with 1000 requests per minute, run:
 # python3 -m tools.scripts.generate_api_key 4 1000
 
 def _parse_args() -> argparse.Namespace:
