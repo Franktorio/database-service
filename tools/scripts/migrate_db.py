@@ -1,8 +1,6 @@
 # ~/tools/scripts/migrate_db.py
 
 import asyncio
-import pathlib
-import sys
 from datetime import datetime
 
 PRINT_PREFIX = "MIGRATION SCRIPT"
@@ -22,7 +20,7 @@ from config.loader import (
 	POSTGRESQL_USERNAME
 )
 from src.models.base import Base
-import src.models.tables 
+import src.models.tables # Unused but here to register the tables to the base class
 from src.services.system.logging import log_message
 
 CHUNK_SIZE = 1000

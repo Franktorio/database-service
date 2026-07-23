@@ -2,10 +2,8 @@
 # This script is intended to be run in a Debian/Ubuntu environment with apt and systemd.
 # It sets up a Redis server with the specified configuration.
 
-import pathlib
 import json
 import subprocess
-import sys
 
 from config.loader import (
     REDIS_HOST,
