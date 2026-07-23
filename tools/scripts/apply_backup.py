@@ -1,4 +1,4 @@
-# ~/src/scripts/apply_backup.py
+# ~/tools/scripts/apply_backup.py
 
 import argparse
 import asyncio
@@ -8,13 +8,13 @@ from src.services.system.logging import log_message
 
 PRINT_PREFIX = "APPLY BACKUP SCRIPT"
 
-# USAGE (on project root): python3 -m scripts.apply_backup <backup_file>
-# e.g., python3 -m scripts.apply_backup backups/backup_20260721060614.sql
+# USAGE (on project root): python3 -m tools.scripts.apply_backup <backup_file>
+# e.g., python3 -m tools.scripts.apply_backup backups/backup_20260721060614.sql
 
 def _argparse_args():
 
     parser = argparse.ArgumentParser(
-        prog="python3 -m scripts.apply_backup",
+        prog="python3 -m tools.scripts.apply_backup",
         description="Apply a database backup from a specified file.",
     )
     parser.add_argument("backup_file", type=str, help="Name of the backup file to apply (must be in the 'backups' directory).")

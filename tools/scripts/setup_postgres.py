@@ -1,4 +1,4 @@
-# ~/src/scripts/setup_postgres.py
+# ~/tools/scripts/setup_postgres.py
 
 import pathlib
 import json
@@ -28,7 +28,7 @@ _SETUP_CONFIG = _SERVICE_CONFIG.get("setup_postgres", {})
 COMMAND_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get("command_subprocess_timeout_seconds", 60)
 PROBE_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get("probe_subprocess_timeout_seconds", 60)
 
-# USAGE (on project root): python3 -m scripts.setup_postgres
+# USAGE (on project root): python3 -m tools.scripts.setup_postgres
 
 DB_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$") # only alphanumeric and underscores for safe CREATE DATABASE execution
 ROLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

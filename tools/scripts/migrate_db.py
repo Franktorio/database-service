@@ -1,4 +1,4 @@
-# ~/src/scripts/migrate_db.py
+# ~/tools/scripts/migrate_db.py
 
 import asyncio
 import pathlib
@@ -7,7 +7,7 @@ from datetime import datetime
 
 PRINT_PREFIX = "MIGRATION SCRIPT"
 
-# USAGE (on project root): python3 -m scripts.migrate_db
+# USAGE (on project root): python3 -m tools.scripts.migrate_db
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:

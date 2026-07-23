@@ -1,4 +1,4 @@
-# ~/src/scripts/setup_redis.py
+# ~/tools/scripts/setup_redis.py
 # This script is intended to be run in a Debian/Ubuntu environment with apt and systemd.
 # It sets up a Redis server with the specified configuration.
 
@@ -43,6 +43,7 @@ PROBE_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get(
 REDIS_CONF_PATH = "/etc/redis/redis.conf"
 PORT_LINE_PATTERN = r"^[[:space:]]*#?[[:space:]]*port[[:space:]]*="
 
+# USAGE (on project root): python3 -m tools.scripts.setup_redis
 
 def _run(command: list[str]) -> subprocess.CompletedProcess:
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Running command: {' '.join(command)}")

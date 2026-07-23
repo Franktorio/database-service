@@ -17,7 +17,7 @@ from src.security.cookie_security import cookie_authentication
 from src.security.tokens import get_cookie_settings
 from src.models.database import init_db
 
-from src.api.config import VIEW_LEVEL, COOKIE_JWT_INDEX
+from src.api.config import VIEW_LEVEL
 
 from src.api.models import LoginRequestBase
 from src.services.system.logging import log_message

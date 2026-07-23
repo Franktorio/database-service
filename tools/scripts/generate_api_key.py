@@ -1,4 +1,4 @@
-# ~/src/scripts/generate_api_key.py
+# ~/tools/scripts/generate_api_key.py
 
 import argparse
 import asyncio
@@ -12,11 +12,11 @@ PRINT_PREFIX = "GENERATE API KEY SCRIPT"
 # USAGE (on project root): python3 -m scripts.generate_api_key <permission_level> <rate_limit>
 
 # To make a SUPER_ADMIN key with 1000 requests per day, run:
-# python3 -m scripts.generate_api_key 4 1000
+# python3 -m tools.scripts.generate_api_key 4 1000
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python3 -m scripts.generate_api_key",
+        prog="python3 -m tools.scripts.generate_api_key",
         description="Create and store a new API key.",
     )
     parser.add_argument("level", type=int, help="Permission level (1-4; use 4 for SUPER_ADMIN bootstrap keys)")
