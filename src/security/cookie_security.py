@@ -1,6 +1,6 @@
+import asyncio
 from functools import wraps
 import time
-import threading
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -19,7 +19,7 @@ from src.services.system.logging import log_message
 
 _ratelimiters: dict[str, RateLimit] = {}
 _last_seen_by_token: dict[str, float] = {}
-_cache_lock = threading.Lock()
+_cache_lock = asyncio.Lock()
 
 
 def _client_ip(request) -> str | None:
@@ -41,11 +41,12 @@ def _place_in_ratelimiters(token_hash: str, rate_limit: int) -> RateLimit:
     return _ratelimiters[token_hash]
 
 
-def cleanup_inactive_cookie_ratelimiters(max_inactive_seconds: int) -> int:
+async def cleanup_inactive_cookie_ratelimiters(max_inactive_seconds: int) -> int:
     """Remove cached cookie ratelimiters that have been inactive for too long."""
     now = time.time()
     removed = 0
-    with _cache_lock:
+    stale_limiters: list[RateLimit] = []
+    async with _cache_lock:
         stale_hashes = [
             token_hash
             for token_hash, last_seen in _last_seen_by_token.items()
@@ -53,27 +54,33 @@ def cleanup_inactive_cookie_ratelimiters(max_inactive_seconds: int) -> int:
         ]
         for token_hash in stale_hashes:
             _last_seen_by_token.pop(token_hash, None)
-            if _ratelimiters.pop(token_hash, None) is not None:
+            limiter = _ratelimiters.pop(token_hash, None)
+            if limiter is not None:
+                stale_limiters.append(limiter)
                 removed += 1
+
+    for limiter in stale_limiters:
+        try:
+            await limiter.delete()
+        except RateLimitServiceUnavailable:
+            # Cleanup should not fail request handling when Redis is down.
+            pass
     return removed
 
 
 async def _obtain_ratelimit(token_hash: str) -> RateLimit:
-    with _cache_lock:
+    async with _cache_lock:
         existing = _ratelimiters.get(token_hash)
         if existing is not None:
             _last_seen_by_token[token_hash] = time.time()
             return existing
 
-    configured_limit = COOKIE_DEFAULT_RATE_LIMIT
-
-    with _cache_lock:
-        existing = _ratelimiters.get(token_hash)
-        if existing is not None:
-            _last_seen_by_token[token_hash] = time.time()
-            return existing
-        return _place_in_ratelimiters(token_hash, configured_limit)
-
+        limiter = _place_in_ratelimiters(
+            token_hash,
+            COOKIE_DEFAULT_RATE_LIMIT,
+        )
+        _last_seen_by_token[token_hash] = time.time()
+        return limiter
 
 def cookie_authentication(required_roles: set[str] | None = None, redirect_url: str | None = None):
     """Decorator that validates a cookie JWT, enforces optional role checks, and per-token rate limits."""
@@ -140,7 +147,7 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token has expired.")
 
-            username = str(token_payload.get("username", "")).strip()
+            username = cookie_row.username # Use the username from the database row instead of the JWT payload to prevent tampering
             if not username:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",

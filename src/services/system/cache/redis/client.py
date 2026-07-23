@@ -94,3 +94,12 @@ class RedisClient:
         except Exception as exc:
             log_message(f"[WARNING] [REDIS CLIENT] Redis ping failed: {exc}")
             return False
+
+    @staticmethod
+    async def eval(script: str, numkeys: int, *keys_and_args: str):
+        """Execute a Lua script in Redis."""
+        client = _get_client()
+        try:
+            return await client.eval(script, numkeys, *keys_and_args)
+        except Exception as exc:
+            raise RedisConnectionError(str(exc)) from exc

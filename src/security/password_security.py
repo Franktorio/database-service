@@ -1,8 +1,8 @@
 # ~/src/security/password_security.py
 # Decorator orchestrator for password validation and rate limiting.
 
+import asyncio
 import time
-import threading
 from fastapi import HTTPException
 
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
@@ -16,21 +16,26 @@ from src.security.tokens import verify_password
 # Dictionary to track per-user password login attempt rate limiters.
 _ratelimiters: dict[str, RateLimit] = {}
 _last_seen_by_user: dict[str, float] = {}
-_cache_lock = threading.Lock()
+_cache_lock = asyncio.Lock()
 
 
 def _place_in_ratelimiters(username: str, rate_limit: int) -> RateLimit:
     current_time = time.time()
-    _ratelimiters[username] = RateLimit(limit=rate_limit, key_hash=username)
+    _ratelimiters[username] = RateLimit(
+        limit=rate_limit,
+        key_hash=username,
+        window_seconds=LOGIN_TIME_WINDOW,
+    )
     _last_seen_by_user[username] = current_time
     return _ratelimiters[username]
 
 
-def cleanup_inactive_password_ratelimiters(max_inactive_seconds: int = LOGIN_TIME_WINDOW) -> int:
+async def cleanup_inactive_password_ratelimiters(max_inactive_seconds: int = LOGIN_TIME_WINDOW) -> int:
     """Remove cached password ratelimiters that have been inactive for too long."""
     now = time.time()
     removed = 0
-    with _cache_lock:
+    stale_limiters: list[RateLimit] = []
+    async with _cache_lock:
         stale_users = [
             username
             for username, last_seen in _last_seen_by_user.items()
@@ -38,13 +43,22 @@ def cleanup_inactive_password_ratelimiters(max_inactive_seconds: int = LOGIN_TIM
         ]
         for username in stale_users:
             _last_seen_by_user.pop(username, None)
-            if _ratelimiters.pop(username, None) is not None:
+            limiter = _ratelimiters.pop(username, None)
+            if limiter is not None:
+                stale_limiters.append(limiter)
                 removed += 1
+
+    for limiter in stale_limiters:
+        try:
+            await limiter.delete()
+        except RateLimitServiceUnavailable:
+            # Cleanup should not fail request handling when Redis is down.
+            pass
     return removed
 
 
 async def _obtain_ratelimit(username: str) -> RateLimit:
-    with _cache_lock:
+    async with _cache_lock:
         existing = _ratelimiters.get(username)
         if existing is not None:
             _last_seen_by_user[username] = time.time()
@@ -53,7 +67,7 @@ async def _obtain_ratelimit(username: str) -> RateLimit:
     user = await get_user_by_username(username)
     configured_limit = user.login_rate_limit if user is not None else LOGIN_ATTEMPTS_LIMIT
 
-    with _cache_lock:
+    async with _cache_lock:
         existing = _ratelimiters.get(username)
         if existing is not None:
             _last_seen_by_user[username] = time.time()

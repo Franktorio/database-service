@@ -2,7 +2,7 @@
 
 ## Report Metadata
 
-- Date: 2026-07-22
+- Date: 2026-07-23
 - Scope: whole-project cybersecurity assessment against modern backend security standards
 - Basis: current main branch in this workspace
 - Method: static code review of authentication, authorization, secrets, transport, data handling, operations, and dependency posture
@@ -15,7 +15,7 @@ This codebase has a **security-aware baseline** but is **not yet production-grad
 Primary reasons:
 
 - Good fundamentals exist (hashed token storage, PBKDF2 password hashing, explicit permission checks, secret-default enforcement outside development).
-- Several high-impact hardening gaps remain (custom JWT/session model, process-local abuse controls, weak proxy/edge trust model, no automated security tests).
+- Several high-impact hardening gaps remain (custom JWT/session model, API-key invalidation race windows after delete/update, weak proxy/edge trust model, no automated security tests).
 
 ---
 
@@ -123,23 +123,26 @@ Primary reasons:
 
 ## 4) Abuse Prevention (Rate Limiting & IP Blocking)
 
-**Score: 4.5/10**
+**Score: 6/10**
 
 ### What Is Done Well
 
 - API keys, login attempts, cookie tokens, and IP addresses all have explicit abuse controls.
 - Cleanup workers exist to limit unbounded cache growth.
 - Retry-after responses are returned for blocked/limited requests.
+- Redis-backed rate limiting with Lua-script atomic updates materially reduces concurrency bypass risk compared to non-atomic cache updates.
 
 ### What Is Below Industry Standards
 
-- All limiter/block state is process-local memory and is bypassable across multiple instances.
-- IP identity uses `request.client.host` directly and does not implement trusted-proxy forwarding policy.
+- API-key delete/update invalidation is not fully atomic with request auth lookups, leaving short stale-cache windows where deleted or downgraded keys may still pass.
+- IP block tracking still depends on local in-process resolver/cache behavior even though limiter counters are Redis-backed.
+- IP identity handling remains sensitive to proxy-edge deployment correctness.
 - Blocking and limiter behavior is not validated by automated abuse-path tests.
 
 ### What a Senior Security Engineer Would Likely Change
 
 - Move abuse-control state to shared infrastructure (for example Redis) with clear consistency semantics.
+- Add atomic key-lifecycle invalidation semantics (tombstone/version check or DB-authoritative recheck on key changes).
 - Add explicit trusted-proxy strategy for IP extraction.
 - Add deterministic tests for burst, distributed, and evasion scenarios.
 
@@ -149,10 +152,10 @@ Primary reasons:
 
 ### Concrete Examples
 
-- `/home/runner/work/database-service/database-service/src/security/ratelimit.py`
-- `/home/runner/work/database-service/database-service/src/security/api_security.py`
-- `/home/runner/work/database-service/database-service/src/security/password_security.py`
-- `/home/runner/work/database-service/database-service/src/security/ip_block.py`
+- `src/security/ratelimit.py`
+- `src/security/api_security.py`
+- `src/security/password_security.py`
+- `src/security/ip_block.py`
 
 ---
 
@@ -314,7 +317,7 @@ Primary reasons:
 
 ### Concrete Examples
 
-- No `tests/` directory detected.
+- `tools/tests/live_system_api_test.py` exists, but no `pytest`-style security regression suite is present.
 - No security test pipeline definitions detected in repository.
 
 ---
@@ -335,7 +338,7 @@ Primary reasons:
 ## Top 10 Security Weaknesses
 
 1. No automated security/regression test suite.
-2. Process-local limiter/IP-block state is bypassable in distributed deployment.
+2. API-key delete/update invalidation currently has short stale-cache race windows (pending fix).
 3. Custom JWT/session implementation increases security maintenance burden.
 4. Missing explicit CSRF strategy for cookie-authenticated flows.
 5. Proxy/IP trust model is not hardened for reverse-proxy deployments.
@@ -351,7 +354,7 @@ Primary reasons:
 
 ### Biggest Practical Exploitation Concern
 
-Distributed deployment can weaken abuse controls because rate limits and IP blocks are local to each process, allowing traffic distribution to reduce control effectiveness.
+Concurrent requests can exploit a short post-delete/post-update window where stale in-memory key state may still authorize briefly before invalidation completes.
 
 ### Biggest Design-Risk Concern
 
@@ -366,10 +369,30 @@ Edge/proxy trust and transport assumptions are not codified strongly enough for 
 ## Recommended Priority Order (Cybersecurity ROI)
 
 1. Add automated security tests and CI security gates for auth/session/abuse paths.
-2. Move limiter and IP-block state to shared infrastructure and define proxy trust policy.
+2. Implement atomic API-key invalidation semantics on delete/update and add regression tests for stale-cache races.
 3. Harden session model (JWT/cookie/CSRF strategy) with standardized primitives.
 4. Enforce transport/edge middleware policy and deployment security contract.
 5. Add dependency governance (vuln scanning, SBOM, patch process).
+
+---
+
+## Security Capacity Estimate (Abuse-Control Perspective)
+
+### Assumptions
+
+- Redis is healthy and reachable with low latency from API instances.
+- PostgreSQL remains available for auth/session lookups.
+- Current architecture and defaults are unchanged.
+
+### Estimated Safe Operating Envelope
+
+- Per API instance, sustained authenticated traffic is typically safe around **80-180 requests/second**.
+- For login-heavy traffic, safe sustained rate is lower: around **10-30 attempts/second** per API instance.
+- With proper multi-instance scaling and healthy Redis, total throughput scales close to linearly until DB becomes the limiting factor.
+
+### Abuse-Control Caveat
+
+- These estimates assume the pending API-key lifecycle race fix is implemented. Until then, short-lived stale-cache acceptance windows can exist under concurrent delete/update events.
 
 ---
 

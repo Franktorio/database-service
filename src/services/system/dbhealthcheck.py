@@ -168,7 +168,7 @@ def remove_bad_backup(backup_file):
         log_message(f"[ERROR] [{PRINT_PREFIX}] Failed to move bad backup file {backup_file} to {destination}: {exc}")
         raise # Re-raise the exception to ensure the calling function is aware of the failure
 
-def healthcheck_service():
+async def healthcheck_service():
     _healthy = True
     _restore_attempted = False
     _last_restored_backup: Path | None = None
@@ -179,15 +179,13 @@ def healthcheck_service():
 
     while True:
         if _restore_attempted and _last_restored_backup:
-            time.sleep(REPARATIONS_INTERVAL)
+            await asyncio.sleep(REPARATIONS_INTERVAL)
         else:
-            time.sleep(INTERVAL)
+            await asyncio.sleep(INTERVAL)
         try:
-            check = asyncio.run(
-                asyncio.wait_for(
-                    database_query_check(),
-                    timeout=HEALTHCHECK_TIMEOUT_SECONDS,
-                )
+            check = await asyncio.wait_for(
+                database_query_check(),
+                timeout=HEALTHCHECK_TIMEOUT_SECONDS,
             )
         except Exception as exc:
             log_message(f"[ERROR] [{PRINT_PREFIX}] Exception during database healthcheck: {exc}")
@@ -266,18 +264,18 @@ def healthcheck_service():
                 )
                 os.kill(os.getpid(), signal.SIGINT)
 
-def _wait_for_db_ready(db_ready_signal):
+async def _wait_for_db_ready(db_ready_signal):
     while True:
         if db_ready_signal.is_ready():
             break
-        time.sleep(1)
+        await asyncio.sleep(1)
 
 
-def _wait_for_db_ready_and_start(db_ready_signal):
+async def _wait_for_db_ready_and_start(db_ready_signal):
     log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting healthcheck loop.")
-    _wait_for_db_ready(db_ready_signal)
+    await _wait_for_db_ready(db_ready_signal)
     log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting healthcheck loop.")
-    healthcheck_service()
+    await healthcheck_service()
 
 
 def start_healthcheck_service(db_ready_signal=None):
@@ -286,8 +284,8 @@ def start_healthcheck_service(db_ready_signal=None):
         return
     
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting database healthcheck service...")
-    thread_target = healthcheck_service
+    thread_target = lambda: asyncio.run(healthcheck_service())
     if db_ready_signal is not None:
-        thread_target = lambda: _wait_for_db_ready_and_start(db_ready_signal)
+        thread_target = lambda: asyncio.run(_wait_for_db_ready_and_start(db_ready_signal))
     thread = threading.Thread(target=thread_target, daemon=True, name="DBHealthCheckService")
     thread.start()

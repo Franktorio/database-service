@@ -5,7 +5,7 @@
 # They do not persist across server restarts, but are stored in memory for the duration of the server's uptime.
 
 import time
-import threading
+import asyncio
 from functools import wraps
 from fastapi import Request, HTTPException
 import ipaddress
@@ -24,7 +24,7 @@ from src.services.system.logging import log_message
 
 _ip_requests: dict[str, RateLimit] = {}  # Maps IP addresses to a RateLimit object that tracks the number of requests and the time window.
 _last_seen_by_ip: dict[str, float] = {}
-_ip_lock = threading.Lock()  # A lock to synchronize access to the _ip_requests dictionary.
+_ip_lock = asyncio.Lock()  # A lock to synchronize access to the _ip_requests dictionary.
 
 
 def _validate_ip_address(ip_address: str) -> bool:
@@ -65,26 +65,31 @@ def _extract_request_from_call(args: tuple, kwargs: dict) -> Request | None:
     return None
 
 
-def _get_or_create_ip_ratelimit(ip_address: str) -> RateLimit:
+async def _get_or_create_ip_ratelimit(ip_address: str) -> RateLimit:
     now = time.time()
-    existing = _ip_requests.get(ip_address)
-    if existing is not None:
+    async with _ip_lock:
+        existing = _ip_requests.get(ip_address)
+        if existing is not None:
+            _last_seen_by_ip[ip_address] = now
+            return existing
+
+        limiter = RateLimit(
+            limit=IP_BLOCKING_THRESHOLD,
+            key_hash=ip_address,
+            window_seconds=IP_BLOCKING_TIME_WINDOW,
+        )
+        _ip_requests[ip_address] = limiter
         _last_seen_by_ip[ip_address] = now
-        return existing
-
-    limiter = RateLimit(limit=IP_BLOCKING_THRESHOLD, key_hash=ip_address)
-    limiter.per_sec_refill = IP_BLOCKING_THRESHOLD / max(1, IP_BLOCKING_TIME_WINDOW)
-    _ip_requests[ip_address] = limiter
-    _last_seen_by_ip[ip_address] = now
-    return limiter
+        return limiter
 
 
-def cleanup_inactive_ip_blocks(max_inactive_seconds: int) -> int:
+async def cleanup_inactive_ip_blocks(max_inactive_seconds: int) -> int:
     """Remove stale IP ratelimiters and expired blocks from memory cache."""
     now = time.time()
     removed = 0
+    stale_limiters: list[RateLimit] = []
 
-    with _ip_lock:
+    async with _ip_lock:
         stale_ips = [
             ip
             for ip, last_seen in _last_seen_by_ip.items()
@@ -92,8 +97,17 @@ def cleanup_inactive_ip_blocks(max_inactive_seconds: int) -> int:
         ]
         for ip in stale_ips:
             _last_seen_by_ip.pop(ip, None)
-            if _ip_requests.pop(ip, None) is not None:
+            limiter = _ip_requests.pop(ip, None)
+            if limiter is not None:
+                stale_limiters.append(limiter)
                 removed += 1
+
+    for limiter in stale_limiters:
+        try:
+            await limiter.delete()
+        except RateLimitServiceUnavailable:
+            # Cleanup should not fail request handling when Redis is down.
+            pass
     return removed
 
 
@@ -125,7 +139,7 @@ def with_ip_block(func):
                 pass
             limiter = None
         else:
-            limiter = _get_or_create_ip_ratelimit(ip_address)
+            limiter = await _get_or_create_ip_ratelimit(ip_address)
             
 
         if blocked_retry_after is None and limiter is not None:

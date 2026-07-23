@@ -1,7 +1,6 @@
 import asyncio
 import json
 import threading
-import time
 
 from config.loader import PROJECT_ROOT
 from src.models.crud.system.auth_cookie_crud import revoke_expired_auth_cookies
@@ -23,30 +22,30 @@ async def _revoke_expired_auth_cookies_with_service_session() -> int:
         return await revoke_expired_auth_cookies(session=session)
 
 
-def _cookie_expiry_loop() -> None:
+async def _cookie_expiry_loop() -> None:
     log_message(
         f"[INFO] [{PRINT_PREFIX}] Cookie expiry revocation loop started. "
         f"interval={COOKIE_EXPIRY_SWEEP_INTERVAL}s"
     )
     while True:
-        revoked = asyncio.run(_revoke_expired_auth_cookies_with_service_session())
+        revoked = await _revoke_expired_auth_cookies_with_service_session()
         if revoked > 0:
             log_message(f"[DEBUG] [{PRINT_PREFIX}] Revoked {revoked} expired auth cookie rows.")
-        time.sleep(COOKIE_EXPIRY_SWEEP_INTERVAL)
+        await asyncio.sleep(COOKIE_EXPIRY_SWEEP_INTERVAL)
 
 
-def _wait_for_db_ready(db_ready_signal) -> None:
+async def _wait_for_db_ready(db_ready_signal) -> None:
     while True:
         if db_ready_signal.is_ready():
             break
-        time.sleep(1)
+        await asyncio.sleep(1)
 
 
-def _wait_for_db_ready_and_start(db_ready_signal) -> None:
+async def _wait_for_db_ready_and_start(db_ready_signal) -> None:
     log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting cookie expiry loop.")
-    _wait_for_db_ready(db_ready_signal)
+    await _wait_for_db_ready(db_ready_signal)
     log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting cookie expiry loop.")
-    _cookie_expiry_loop()
+    await _cookie_expiry_loop()
 
 
 def start_cookie_expiry_service(db_ready_signal=None) -> None:
@@ -55,8 +54,8 @@ def start_cookie_expiry_service(db_ready_signal=None) -> None:
         return
 
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting cookie expiry revocation service...")
-    thread_target = _cookie_expiry_loop
+    thread_target = lambda: asyncio.run(_cookie_expiry_loop())
     if db_ready_signal is not None:
-        thread_target = lambda: _wait_for_db_ready_and_start(db_ready_signal)
+        thread_target = lambda: asyncio.run(_wait_for_db_ready_and_start(db_ready_signal))
     thread = threading.Thread(target=thread_target, daemon=True, name="CookieExpiryService")
     thread.start()

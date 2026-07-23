@@ -1,7 +1,6 @@
 import asyncio
 import json
 import threading
-import time
 
 from config.loader import PROJECT_ROOT
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
@@ -30,31 +29,31 @@ async def _persist_cleanup_log_with_service_session(removed: int) -> None:
         )
 
 
-def _ip_block_cache_loop() -> None:
+async def _ip_block_cache_loop() -> None:
     log_message(
         f"[INFO] [{PRINT_PREFIX}] IP block cache cleanup loop started. "
         f"interval={IP_BLOCK_CACHE_SWEEP_INTERVAL}s max_inactive={IP_BLOCK_CACHE_MAX_INACTIVE_SECONDS}s"
     )
     while True:
-        removed = cleanup_inactive_ip_blocks(IP_BLOCK_CACHE_MAX_INACTIVE_SECONDS)
+        removed = await cleanup_inactive_ip_blocks(IP_BLOCK_CACHE_MAX_INACTIVE_SECONDS)
         if removed > 0:
             log_message(f"[DEBUG] [{PRINT_PREFIX}] Removed {removed} stale IP cache entries.")
-            asyncio.run(_persist_cleanup_log_with_service_session(removed))
-        time.sleep(IP_BLOCK_CACHE_SWEEP_INTERVAL)
+            await _persist_cleanup_log_with_service_session(removed)
+        await asyncio.sleep(IP_BLOCK_CACHE_SWEEP_INTERVAL)
 
 
-def _wait_for_db_ready(db_ready_signal) -> None:
+async def _wait_for_db_ready(db_ready_signal) -> None:
     while True:
         if db_ready_signal.is_ready():
             break
-        time.sleep(1)
+        await asyncio.sleep(1)
 
 
-def _wait_for_db_ready_and_start(db_ready_signal) -> None:
+async def _wait_for_db_ready_and_start(db_ready_signal) -> None:
     log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting IP block cache loop.")
-    _wait_for_db_ready(db_ready_signal)
+    await _wait_for_db_ready(db_ready_signal)
     log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting IP block cache loop.")
-    _ip_block_cache_loop()
+    await _ip_block_cache_loop()
 
 
 def start_ip_block_cache_service(db_ready_signal=None) -> None:
@@ -63,8 +62,8 @@ def start_ip_block_cache_service(db_ready_signal=None) -> None:
         return
 
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting IP block cache cleanup service...")
-    thread_target = _ip_block_cache_loop
+    thread_target = lambda: asyncio.run(_ip_block_cache_loop())
     if db_ready_signal is not None:
-        thread_target = lambda: _wait_for_db_ready_and_start(db_ready_signal)
+        thread_target = lambda: asyncio.run(_wait_for_db_ready_and_start(db_ready_signal))
     thread = threading.Thread(target=thread_target, daemon=True, name="IpBlockCacheService")
     thread.start()

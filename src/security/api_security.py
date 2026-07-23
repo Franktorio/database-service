@@ -2,8 +2,8 @@
 # Decorator orchestrator for API key validation and rate limiting.
 
 from functools import wraps
+import asyncio
 import time
-import threading
 from fastapi import HTTPException, Request
 
 from src.models.tables.system.api_key_table import ApiKey
@@ -13,10 +13,11 @@ from src.security.tokens import hash_token
 from src.security.ratelimit import RateLimit, RateLimitServiceUnavailable
 from src.api.config import PERM_LEVEL_MAP
 from src.services.system.logging import log_message
+from src.services.system.cache.redis.client import RedisClient
 
 _ratelimiters: dict[str, RateLimit] = {}
 _last_seen_by_key: dict[str, float] = {}
-_cache_lock = threading.Lock()
+_cache_lock = asyncio.Lock()
 
 PRINT_PREFIX = "API VALIDATE"
 
@@ -68,26 +69,37 @@ def _place_in_ratelimiters(api_key: ApiKey) -> RateLimit:
     limit = api_key.rate_limit
     level = api_key.permission_level
     current_time = time.time()
-    _ratelimiters[api_hash] = RateLimit(limit=limit, key_hash=api_hash, permission_level=level)
+    _ratelimiters[api_hash] = RateLimit(
+        limit=limit,
+        key_hash=api_hash,
+        permission_level=level,
+    )
     _last_seen_by_key[api_hash] = current_time
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Placed API hash {api_hash[:12]}... in rate limiters with limit {api_key.rate_limit}.")
     return _ratelimiters[api_hash]
 
-def refresh_ratelimiter(api_object: ApiKey) -> RateLimit:
+async def refresh_ratelimiter(api_object: ApiKey) -> RateLimit:
     """
     Refresh the RateLimit instance for the given API key in the ratelimiters dictionary. 
     Use when the API key's rate limit has changed in the database. 
     Does not check if the API key exists in the database; it assumes the caller has already verified that.
     """
-    with _cache_lock:
-        _ratelimiters[api_object.key_hash] = _place_in_ratelimiters(api_object)
-        _last_seen_by_key[api_object.key_hash] = time.time()
-        
-    return _ratelimiters[api_object.key_hash]
+    api_hash = api_object.key_hash
+    limiter = _ratelimiters.get(api_hash)
+    if limiter is not None:
+        await limiter.delete() # Remove the old RateLimit instance from Redis
+    async with _cache_lock:
+        _ratelimiters[api_hash] = _place_in_ratelimiters(api_object)
+        _last_seen_by_key[api_hash] = time.time()
+    
+    return _ratelimiters[api_hash]
 
-def remove_ratelimiter(api_hash: str) -> bool:
+async def remove_ratelimiter(api_hash: str) -> bool:
     """Remove the RateLimit instance for the given API key from the ratelimiters dictionary. Returns True if removed, False if not found."""
-    with _cache_lock:
+    limiter = _ratelimiters.get(api_hash)
+    if limiter is not None:
+        await limiter.delete()  # Remove the RateLimit instance from Redis
+    async with _cache_lock:
         removed = _ratelimiters.pop(api_hash, None) is not None
         _last_seen_by_key.pop(api_hash, None)
     if removed:
@@ -96,11 +108,12 @@ def remove_ratelimiter(api_hash: str) -> bool:
         log_message(f"[DEBUG] [{PRINT_PREFIX}] Attempted to remove API hash {api_hash[:12]}... from rate limiters, but it was not found.")
     return removed
 
-def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
+async def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
     """Remove cached ratelimiters that have been inactive longer than the given threshold."""
     now = time.time()
     removed = 0
-    with _cache_lock:
+    stale_limiters: list[RateLimit] = []
+    async with _cache_lock:
         stale_hashes = [
             api_hash
             for api_hash, last_seen in _last_seen_by_key.items()
@@ -108,8 +121,18 @@ def cleanup_inactive_ratelimiters(max_inactive_seconds: int) -> int:
         ]
         for api_hash in stale_hashes:
             _last_seen_by_key.pop(api_hash, None)
-            if _ratelimiters.pop(api_hash, None) is not None:
+            limiter = _ratelimiters.pop(api_hash, None)
+            if limiter is not None:
+                stale_limiters.append(limiter)
                 removed += 1
+
+    for limiter in stale_limiters:
+        try:
+            await limiter.delete()
+        except RateLimitServiceUnavailable:
+            log_message(
+                f"[WARNING] [{PRINT_PREFIX}] Failed to delete stale limiter in Redis during cleanup."
+            )
 
     if removed > 0:
         log_message(
@@ -122,7 +145,7 @@ async def _obtain_ratelimit(api_key: str, ip_address: str | None = None) -> Rate
     """Store the API key in the rate limiters dictionary and return its RateLimit instance."""
     api_hash = hash_token(api_key)
 
-    with _cache_lock:
+    async with _cache_lock:
         existing = _ratelimiters.get(api_hash)
         if existing is not None:
             _last_seen_by_key[api_hash] = time.time()
@@ -146,7 +169,7 @@ async def _obtain_ratelimit(api_key: str, ip_address: str | None = None) -> Rate
         )
         return None
 
-    with _cache_lock:
+    async with _cache_lock:
         existing = _ratelimiters.get(api_hash)
         if existing is not None:
             _last_seen_by_key[api_hash] = time.time()
@@ -236,16 +259,6 @@ def api_authentication(permission_level: int):
                     status_code=429,
                     detail={"error": "Rate limit exceeded.", "retry_after": status},
                 )
-
-            await safe_add_persistent_log(
-                log_type="API AUTH",
-                log_level="INFO",
-                message=(
-                    "API key authentication accepted. "
-                    f"fingerprint={fingerprint} permission={ratelimit.permission_level}"
-                ),
-                ip_address=client_ip,
-            )
             
             seconds_since_last_request = 0.0
             try:

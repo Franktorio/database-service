@@ -25,6 +25,6 @@ async def delete_key(request: Request, model: ApiKeyDeleteRequest):
     if not deleted:
         raise HTTPException(status_code=404, detail="API key not found.")
     
-    remove_ratelimiter(key_hash)
+    await remove_ratelimiter(key_hash)
 
     return {"message": "API key deleted successfully."}

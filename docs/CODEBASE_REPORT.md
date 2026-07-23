@@ -5,7 +5,7 @@
 - Date: 2026-07-23
 - Scope: whole-project engineering assessment against modern industry standards
 - Basis: current main branch in this workspace
-- Method: static code review of architecture, API, data, security, operations, and docs
+- Method: static code review plus targeted async/rate-limit control-flow review across security and background services
 - Testing status: one live end-to-end API script detected; no unit/integration harness or CI gates detected
 
 ## Executive Verdict
@@ -16,6 +16,7 @@ Primary reasons:
 
 - Architecture and security controls have improved materially (Redis-backed rate limiting, trusted proxy configuration path, more explicit role handling).
 - Reliability/testing/operability maturity still lags (no automated CI test gate, daemon-thread workers, migration/recovery rigor gaps).
+- API-key lifecycle invalidation still has short race windows after delete/update (pending fix), which can briefly preserve stale authorization/rate-limit state under concurrency.
 
 ---
 
@@ -214,12 +215,14 @@ Primary reasons:
 - Healthcheck and backup services are present and configurable.
 - Persistent auth/abuse logging supports incident forensics.
 - Startup DB readiness gating materially improves startup correctness.
+- Cache-cleanup worker loops now use async sleeps and awaitable cleanup paths instead of blocking sleep calls inside async code.
 
 ### What Is Below Industry Standards
 
 - Recovery/restore path can still be destructive if backup quality is poor.
 - Daemon-thread background services remain unsupervised worker architecture.
 - Redis dependency introduces additional outage modes for auth-protected routes.
+- API-key delete/update invalidation is not atomic with request authorization checks, leaving short stale-cache race windows.
 
 ### What a Senior Engineer Would Likely Change
 
@@ -249,12 +252,14 @@ Primary reasons:
 - Query patterns are mostly simple and indexed.
 - Async stack is used consistently across API and DB layers.
 - Shared Redis limiter state improves multi-instance fairness versus process-local counters.
+- Redis Lua-based limiter updates remove non-atomic get/set races that could otherwise allow rate-limit overshoot under concurrency.
 
 ### What Is Below Industry Standards
 
 - `NullPool` still forces frequent DB connection churn.
 - Auth flows often involve multiple DB reads/writes plus Redis traffic.
 - Cookie/session validation remains DB-coupled for revocation checks on hot paths.
+- Per-request Redis roundtrips in auth paths add overhead without local short-circuit fallback for outage/degraded operation.
 
 ### What a Senior Engineer Would Likely Change
 
@@ -369,6 +374,36 @@ Signals preventing senior/production-grade classification:
 
 ---
 
+## 11) Estimated Capacity (Current Architecture)
+
+**Score: 5.5/10 (capacity planning maturity)**
+
+### Assumptions
+
+- Single API instance, one PostgreSQL instance, one Redis instance in the same region/VPC.
+- Typical cloud sizing around 2 vCPU / 4 GB RAM for API process.
+- Current config preserved (`NullPool`, DB-backed auth checks, persistent security logging).
+- Mix includes authenticated read endpoints plus occasional login and admin writes.
+
+### Estimated Throughput
+
+- Steady authenticated API traffic (API key or cookie auth): about **80-180 requests/second** per API instance before latency rises sharply.
+- Login/password-heavy traffic: about **10-30 login attempts/second** per API instance due to password hashing and DB touches.
+- Mixed workload (mostly reads, some auth writes): about **60-140 requests/second** per API instance at stable behavior.
+
+### Estimated Concurrent Users
+
+- Light usage (one request every 10-20s): about **700-2,500 concurrent users** per API instance.
+- Moderate usage (one request every 3-5s): about **180-700 concurrent users** per API instance.
+- Burst-heavy usage with tighter latency expectations: about **100-300 concurrent users** per API instance.
+
+### Scaling Notes
+
+- Horizontal API scaling can increase aggregate capacity near-linearly for stateless paths, but DB and Redis become shared bottlenecks quickly.
+- Replacing `NullPool`, reducing synchronous auth-path writes, and adding dedicated worker supervision can often improve practical capacity by **2x-4x**.
+
+---
+
 ## Top 10 Strengths
 
 1. Clear package-level separation of concerns.
@@ -392,7 +427,7 @@ Signals preventing senior/production-grade classification:
 6. Limited production observability stack.
 7. Daemon-thread operational jobs instead of supervised workers.
 8. Security-critical custom logic without deep regression harness.
-9. Partial process-local state remains in IP block handling.
+9. API-key delete/update invalidation has short stale-cache race windows (pending implementation fix).
 10. Redis outage behavior can deny protected traffic (503) without graceful fallback.
 
 ---
@@ -405,7 +440,7 @@ Operational services and security control paths still rely on in-process daemon 
 
 ### Biggest Security Concern
 
-Authentication/session stack is custom and tightly coupled to persistence and limiter infrastructure, but still lacks deep automated security regression coverage.
+Authentication/session stack is custom and tightly coupled to persistence and limiter infrastructure, and API-key lifecycle invalidation still has short stale-cache race windows pending an atomic invalidation strategy.
 
 ### Biggest Scalability Concern
 
