@@ -8,6 +8,7 @@ import time
 import threading
 from functools import wraps
 from fastapi import Request, HTTPException
+import ipaddress
 
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.ratelimit import RateLimit, RateLimitServiceUnavailable
@@ -16,6 +17,7 @@ from config.loader import (
     IP_BLOCKING_THRESHOLD,
     IP_BLOCKING_TIME_WINDOW,
     IP_BLOCKING_DURATION,
+    TRUSTED_PROXIES,
 )
 from src.services.system.logging import log_message
 
@@ -24,14 +26,33 @@ _blocked_until_by_ip: dict[str, float] = {}
 _last_seen_by_ip: dict[str, float] = {}
 _ip_lock = threading.Lock()  # A lock to synchronize access to the _ip_requests dictionary.
 
+
+def _validate_ip_address(ip_address: str) -> bool:
+    """Validate the format of an IP address (IPv4 or IPv6)."""
+
+    try:
+        ipaddress.ip_address(ip_address)
+        return True
+    except ValueError:
+        return False
+
+
 def _get_client_ip(request: Request) -> str | None:
-    """Extract the client's IP address from the request."""
-    client = getattr(request, "client", None)
-    if client is not None:
-        host = getattr(client, "host", None)
-        if host:
-            return host
-    return None
+    peer_ip = request.client.host if request.client else None
+
+    if peer_ip in TRUSTED_PROXIES:
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip.strip()
+        
+    if not _validate_ip_address(peer_ip):
+        return None
+
+    return peer_ip
 
 
 def _extract_request_from_call(args: tuple, kwargs: dict) -> Request | None:

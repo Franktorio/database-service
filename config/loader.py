@@ -52,6 +52,8 @@ IP_BLOCKING_THRESHOLD: int = int(os.getenv('IP_BLOCKING_THRESHOLD', '300'))
 IP_BLOCKING_TIME_WINDOW: int = int(os.getenv('IP_BLOCKING_TIME_WINDOW', '10'))
 IP_BLOCKING_DURATION: int = int(os.getenv('IP_BLOCKING_DURATION', '3600'))
 
+TRUSTED_PROXIES: list[str] = [proxy.strip() for proxy in os.getenv('TRUSTED_PROXIES', '').split(',') if proxy.strip()]
+
 # Redis configuration
 REDIS_HOST: str = os.getenv('REDIS_HOST', 'localhost')
 REDIS_PORT: int = int(os.getenv('REDIS_PORT', '6379'))

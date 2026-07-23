@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Any
 
-from config.loader import API_ENABLED, API_PORT
+from config.loader import API_ENABLED, API_PORT, TRUSTED_PROXIES
 from src.api.system.api_db_endpoints import routes as api_db_routes
 from src.api.system.user_db_endpoints import routes as user_db_routes
 from src.security.api_security import api_authentication
@@ -61,7 +61,7 @@ def start_api_server(db_ready_signal=None):
         f"{api_db_routes.router.tags + user_db_routes.router.tags}"
     )
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting API server on port {API_PORT}...")
-    uvicorn.run(app, host="0.0.0.0", port=API_PORT)
+    uvicorn.run(app, host="0.0.0.0", port=API_PORT, forwarded_allow_ips=",".join(TRUSTED_PROXIES))
     
 
 @app.get("/")
