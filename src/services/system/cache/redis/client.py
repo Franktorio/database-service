@@ -1,5 +1,6 @@
 # ~/src/services/system/cache/redis/client.py
 
+import atexit
 import threading
 
 import redis.asyncio as redis
@@ -10,18 +11,37 @@ from src.services.system.logging import log_message
 
 
 _thread_local = threading.local()
+_all_clients: list[redis.Redis] = []
+_all_clients_lock = threading.Lock()
 
 
 def _get_client() -> redis.Redis:
     """Return the thread-local Redis client, creating it on first access."""
-    if not hasattr(_thread_local, "client"):
-        _thread_local.client = redis.Redis(
+    client = getattr(_thread_local, "client", None)
+    if client is None:
+        client = redis.Redis(
             host=REDIS_HOST,
             port=REDIS_PORT,
             password=REDIS_PASSWORD,
             decode_responses=True,
         )
+        _thread_local.client = client
+        with _all_clients_lock:
+            _all_clients.append(client)
     return _thread_local.client
+
+def _close_all_clients() -> None:
+    """Close all thread-local Redis clients at process exit."""
+    with _all_clients_lock:
+        clients = list(_all_clients)
+    for client in clients:
+        try:
+            client.connection_pool.disconnect()
+        except Exception:
+            pass
+
+
+atexit.register(_close_all_clients)
 
 
 class RedisClient:
