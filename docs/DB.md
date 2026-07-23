@@ -29,22 +29,25 @@ Operational implications:
 
 ## Startup and DB Readiness Sequencing
 
-The startup design now uses a readiness gate.
+The startup design now combines a readiness gate with FastAPI lifespan-managed async tasks.
 
 Observed sequence:
 
-- main.py creates a DBReadySignal and starts background services with that signal.
-- Service threads (backup, healthcheck, cookie-expiry, and cache-cleaners) block in a wait loop until signal.is_ready() is true.
+- main.py creates a DBReadySignal and starts the backup thread with that signal.
 - API server starts via Uvicorn.
-- FastAPI lifespan startup calls init_db(), then sets DBReadySignal ready.
+- FastAPI lifespan startup calls init_db().
+- Lifespan then starts async tasks (healthcheck, cookie-expiry, ratelimit-cache, and ip-block-cache) on the same event loop.
+- DBReadySignal is set ready after DB initialization, allowing backup loop startup.
 
 What this fixes:
 
-- Background loops no longer race DB initialization at process startup.
+- Async maintenance loops no longer run in separate threads with independent event loops.
+- DB-dependent loops no longer race schema initialization at process startup.
 
 Residual caveat:
 
-- DBReadySignal is in-process memory only. This is correct for single-process operation but not meaningful across multiple worker processes or hosts.
+- DBReadySignal is in-process memory only. This is fine for single-process operation but not meaningful across multiple worker processes or hosts.
+- Service lifecycle is still mixed: backup remains thread-based while other maintenance services are loop-managed.
 
 ## Schema Initialization Semantics
 

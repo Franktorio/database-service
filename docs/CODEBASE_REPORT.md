@@ -7,36 +7,36 @@ Scope: Whole-project engineering assessment against modern industry standards.
 
 Overall, this is strong mid-level backend engineering work with clear architecture intent and practical operations support. It is not yet production-grade by strict industry standards. The largest gaps are in test depth, transaction/operational rigor, and security hardening for multi-instance production deployments.
 
-Overall score: 5.4/10
+Overall score: 5.8/10
 
 ---
 
 ## 1. Project Architecture
 
-Score: 6/10
+Score: 7/10
 
 What is done well:
 - The repository is cleanly separated into API, models/CRUD, security, services, tools, and docs.
-- Startup readiness gating is present via DB ready signaling before service loops start.
-- Route families are modularized by domain under API endpoint packages.
+- Async background loops now run as FastAPI lifespan tasks on the same event loop as request handling.
+- Startup sequencing is clear: DB init first, then async background tasks, then normal serving.
 
 What is below industry standards:
-- Security and ratelimit state ownership is split between process-local memory and Redis.
-- Threaded background services are embedded in the API process, increasing lifecycle complexity.
+- Security and ratelimit state ownership is still split between process-local memory and Redis.
+- Backup remains thread-based while other background services are event-loop managed, creating mixed lifecycle models.
 - Cross-cutting concerns (auth, logging, persistence side-effects) are tightly coupled.
 
 What a senior engineer would likely change:
-- Move background jobs to isolated worker processes/services.
-- Consolidate ephemeral state into a single shared backend for horizontal scale correctness.
+- Keep all periodic services in one supervision model (either all event-loop tasks or explicit worker processes).
+- Consolidate mutable security state in shared stores for horizontal scaling correctness.
 - Introduce explicit application service boundaries and unit-of-work transaction orchestration.
 
 How serious this is:
-- Medium to high. It will become fragile with scale and multi-instance deployments.
+- Medium. Improved from prior state, but still risky under scale and failure complexity.
 
 Concrete examples:
-- main.py startup orchestration and shared DBReadySignal.
-- src/api/app.py lifespan DB init plus signal handling.
-- src/security/api_security.py in-memory limiter cache plus Redis-backed limiter state.
+- Lifespan task orchestration in src/api/app.py.
+- Backup thread startup in main.py and src/services/system/backup.py.
+- In-memory limiter registries in src/security/api_security.py and peers.
 
 ---
 
@@ -78,24 +78,24 @@ Score: 6/10
 What is done well:
 - Core schema is straightforward and purpose-fit for admin/auth operations.
 - Useful indexes exist for key lookup and time-based retrieval.
-- Async SQLAlchemy setup is clean and understandable.
+- Async SQLAlchemy setup is clear and maintainable.
 
 What is below industry standards:
 - No formal migration framework/revision history.
 - Missing relational integrity constraints for some auth data relationships.
-- NullPool in runtime path increases connect/disconnect overhead.
+- Connection URL construction does not URL-encode credentials.
 
 What a senior engineer would likely change:
 - Adopt Alembic with versioned migrations and rollback strategy.
 - Add stronger FK/check constraints where appropriate.
-- Use a production pool strategy with measured tuning.
+- Build DATABASE_URL using safe URL constructors/encoding.
 
 How serious this is:
-- High for long-term correctness and scalability.
+- High for long-term correctness and operability.
 
 Concrete examples:
-- src/models/database.py uses NullPool.
-- tools/scripts/migrate_db.py uses copy/swap strategy that can silently skip incompatible columns.
+- src/models/database.py startup schema and engine setup.
+- tools/scripts/migrate_db.py copy/swap migration strategy.
 - src/models/tables/system/auth_cookie_table.py stores username without FK enforcement.
 
 ---
@@ -152,18 +152,18 @@ How serious this is:
 
 Concrete examples:
 - src/security/tokens.py custom JWT encode/decode/signing.
-- src/security/ip_block.py trusts forwarded headers for configured proxies.
+- src/security/ip_block.py trusts forwarded headers only for configured proxies.
 - config/loader.py blocks unsafe defaults only outside development mode.
 
 ---
 
 ## 6. Reliability
 
-Score: 5/10
+Score: 6/10
 
 What is done well:
 - Healthcheck and backup services exist and are configurable.
-- Best-effort persistent logging avoids total request failure when logging persistence fails.
+- Async services now run in the same event loop and are canceled cleanly on lifespan shutdown.
 - Redis outages in limiter paths are explicitly surfaced as service unavailable.
 
 What is below industry standards:
@@ -180,35 +180,37 @@ How serious this is:
 - High.
 
 Concrete examples:
-- src/services/system/dbhealthcheck.py restore_from_backup path drops and recreates DB.
-- src/services/system/backup.py relies on subprocess success without replay verification.
+- Task cancellation and cleanup in src/api/app.py.
+- restore_from_backup flow in src/services/system/dbhealthcheck.py.
+- Backup subprocess flow in src/services/system/backup.py.
 
 ---
 
 ## 7. Performance
 
-Score: 5/10
+Score: 6/10
 
 What is done well:
 - Redis-backed token bucket with Lua script is a strong direction for atomic limiting.
+- Async background loops now avoid per-thread event-loop overhead.
 - Basic indexing aligns with common retrieval paths.
 
 What is below industry standards:
-- NullPool adds connection churn under load.
 - Frequent persistent log writes on auth paths can amplify latency and DB pressure.
 - Mixed local cache + shared store patterns complicate predictable scaling behavior.
+- Some service paths still use blocking subprocess work in-process.
 
 What a senior engineer would likely change:
-- Tune pooled DB connections and benchmark auth endpoints under concurrency.
 - Decouple security/audit logging from synchronous request paths where feasible.
-- Add profiling and SLO-based optimization targets.
+- Standardize shared-state strategy for limiter/block metadata.
+- Isolate heavy operational actions into dedicated workers.
 
 How serious this is:
 - Medium to high under real traffic.
 
 Concrete examples:
-- src/models/database.py poolclass=NullPool.
-- src/security/api_security.py and src/security/password_security.py call persistent DB logging on many auth outcomes.
+- src/security/api_security.py and src/security/password_security.py persistent-log write paths.
+- src/services/system/dbhealthcheck.py restore subprocess flow.
 
 ---
 
@@ -239,17 +241,17 @@ Concrete examples:
 
 ## 9. Production Readiness
 
-Score: 4/10
+Score: 5/10
 
 What is done well:
 - Environment-driven configuration exists.
 - Backup/healthcheck/process utilities are present.
-- Documentation quality is above average for project size.
+- Lifespan-managed async services are closer to production lifecycle best practices.
 
 What is below industry standards:
 - Deployment model appears primarily single-node/manual.
 - Missing visible CI/CD pipeline, observability standards, and progressive release practices.
-- Destructive restore automation in runtime process is a major production risk.
+- Destructive restore automation in runtime process remains a major production risk.
 
 What a senior engineer would likely change:
 - Add staged deployment pipeline and rollback controls.
@@ -260,6 +262,7 @@ How serious this is:
 - High.
 
 Concrete examples:
+- Lifecycle management in src/api/app.py.
 - Operational scripts in tools/scripts/*.py.
 - Runtime recovery logic in src/services/system/dbhealthcheck.py.
 
@@ -275,12 +278,12 @@ Level estimate:
 Signals for this conclusion:
 - Positive signals:
   - Thoughtful module separation and security-conscious defaults.
-  - Practical operational tooling and service health logic.
-  - Typed async data access stack.
+  - Material architecture improvement by moving async services into FastAPI lifespan tasks.
+  - Practical operational tooling and typed async stack.
 - Limiting signals:
   - Test strategy is underdeveloped.
-  - Some architectural choices will not hold up cleanly at scale.
-  - Security and DR hardening are not yet at production-grade rigor.
+  - Security/DR hardening are not yet production-grade.
+  - Shared-state design still has scale caveats.
 
 ---
 
@@ -292,7 +295,7 @@ Signals for this conclusion:
 4. Strong basic credential handling (hashing + pepper).
 5. Non-dev secret safety enforcement.
 6. Sensible indexing for key access paths.
-7. Startup readiness sequencing.
+7. Lifespan-based async task orchestration with graceful cancellation.
 8. Built-in backup and healthcheck operational support.
 9. Consistent CRUD surface ergonomics.
 10. Strong documentation coverage for a compact service.
@@ -300,21 +303,21 @@ Signals for this conclusion:
 ## Top 10 Weaknesses
 
 1. Limited automated test coverage depth.
-2. NullPool runtime DB strategy.
-3. Destructive runtime auto-restore design risk.
-4. Transaction atomicity concerns due to nested helper commits.
-5. Mixed local/Redis state consistency hazards.
-6. Custom JWT implementation burden and risk.
-7. API semantics partially RPC-style.
-8. Synchronous persistent logging on critical auth paths.
-9. Migration strategy lacks formal revisioning guarantees.
-10. Production deployment/observability maturity gap.
+2. Destructive runtime auto-restore design risk.
+3. Transaction atomicity concerns due to nested helper commits.
+4. Mixed local/Redis state consistency hazards.
+5. Custom JWT implementation burden and risk.
+6. API semantics partially RPC-style.
+7. Synchronous persistent logging on critical auth paths.
+8. Migration strategy lacks formal revisioning guarantees.
+9. Production deployment/observability maturity gap.
+10. Mixed thread + loop service lifecycle model.
 
 ---
 
 ## Biggest Architectural Concern
 
-State and lifecycle consistency across mixed execution models: async API handlers, daemon threads, in-memory caches, and shared Redis state. This creates hidden correctness and operability risks as soon as horizontal scaling or multi-worker deployment is introduced.
+State consistency across process-local limiter/block caches and shared Redis state under multi-instance deployment. Lifespan task management improved runtime coherence, but distributed correctness risks remain.
 
 ## Biggest Security Concern
 
@@ -322,7 +325,7 @@ Custom JWT and security-critical flow implementation rather than using hardened,
 
 ## Biggest Scalability Concern
 
-Connection churn (NullPool) plus synchronous DB writes on auth-heavy request paths can create avoidable bottlenecks and outage amplification under load.
+Synchronous DB logging on auth-heavy request paths and mixed shared/local state can create contention and inconsistent enforcement at higher traffic and node counts.
 
 ---
 
@@ -332,7 +335,7 @@ Connection churn (NullPool) plus synchronous DB writes on auth-heavy request pat
 2. Transaction design and explicit unit-of-work patterns.
 3. Production security hardening (auth libraries, threat modeling, trust boundaries).
 4. Reliability engineering and disaster recovery safety practices.
-5. Performance engineering (pool tuning, profiling, capacity planning).
+5. Distributed systems design for multi-instance consistency.
 
 ---
 
@@ -342,5 +345,5 @@ Estimated level reflected by this codebase: Mid-level.
 
 Rationale:
 - Strong implementation discipline and modular organization are evident.
-- Practical operational concerns have been addressed beyond beginner scope.
-- The major gap is production rigor: testing depth, safe failure handling, and scalable architecture patterns expected for senior-grade systems.
+- Architectural direction improved with lifespan-based async task orchestration.
+- The major gap remains production rigor: testing depth, hardening, and distributed operational maturity expected for senior-grade systems.

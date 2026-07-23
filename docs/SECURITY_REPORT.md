@@ -5,9 +5,9 @@ Scope: Whole-application cybersecurity assessment focused on architecture, authe
 
 ## Executive Summary
 
-The security baseline is better than typical early-stage hobby projects, but it is not production-hardened. The most important concerns are custom implementation of critical security primitives, inconsistent distributed control-state assumptions, and limited dedicated security testing.
+The security baseline is better than typical early-stage hobby projects, but it is not production-hardened. The move to FastAPI lifespan-managed async service tasks improved runtime consistency and reduced thread/event-loop fragmentation for security-adjacent background controls. Major concerns remain around custom auth primitives, distributed control-state consistency, and limited dedicated security testing.
 
-Overall security score: 5/10
+Overall security score: 5.2/10
 
 ---
 
@@ -15,14 +15,15 @@ Overall security score: 5/10
 
 ### 1. Security Architecture
 
-Score: 5/10
+Score: 6/10
 
 What is done well:
 - Security concerns are split into dedicated modules for API key auth, cookie auth, password auth, IP block, and rate limiting.
-- Auth checks are layered through decorators, making control points explicit.
+- Security-related async maintenance loops now run on the same FastAPI event loop via lifespan task creation.
+- Task cancellation on shutdown is explicit, reducing orphaned control loops.
 
 What is below industry standards:
-- Security decision state is split across process memory and Redis.
+- Security decision state is still split across process memory and Redis.
 - Security controls may behave differently across instances/workers under scale.
 
 What a senior security engineer would likely change:
@@ -33,6 +34,7 @@ How serious this is:
 - High for horizontally scaled deployments.
 
 Concrete examples:
+- src/api/app.py lifespan task orchestration.
 - src/security/api_security.py
 - src/security/password_security.py
 - src/security/cookie_security.py
@@ -123,6 +125,7 @@ Score: 4/10
 What is done well:
 - Many invalid auth paths are rejected with proper HTTP errors.
 - Rate limiting and IP blocking exist.
+- Background control loops now use one event loop model, reducing implementation complexity vulnerabilities.
 
 What is below industry standards:
 - Some controls are deployment-sensitive (proxy trust assumptions).
@@ -152,6 +155,7 @@ Score: 5/10
 What is done well:
 - Redis outages in limiter paths produce explicit service-unavailable behavior.
 - Abuse controls (ratelimits/IP blocking) are implemented.
+- Lifespan shutdown now cancels async maintenance tasks cleanly.
 
 What is below industry standards:
 - Security event persistence adds DB dependency to hot auth paths.
@@ -165,6 +169,7 @@ How serious this is:
 - High.
 
 Concrete examples:
+- src/api/app.py task cancellation and shutdown cleanup.
 - src/models/crud/system/persistent_logs_crud.py
 - src/services/system/dbhealthcheck.py
 
@@ -227,9 +232,9 @@ Concrete examples:
 5. Redis-backed token bucket limiter supports atomicity.
 6. IP-based temporary blocking exists.
 7. Security logging coverage is broad.
-8. Distinct modules for auth, token, and abuse controls improve auditability.
+8. Lifespan-managed async security-adjacent loops reduce concurrency model complexity.
 9. Configurable security thresholds exist for multiple controls.
-10. Security concerns are not buried in route handlers; they are centralized enough to improve maintainability.
+10. Security concerns are not buried in route handlers; they are centralized enough to improve auditability.
 
 ## Top 10 Cybersecurity Weaknesses
 
@@ -266,4 +271,5 @@ Current maturity: Mid-level security awareness, not production-hardened.
 
 Reasoning:
 - There is clear intent and real security controls in place.
-- However, risk is elevated by custom security primitives, incomplete test rigor, and operational recovery/security controls that are not yet enterprise-grade.
+- Runtime concurrency model is now cleaner and less fragmented for async security controls.
+- However, risk remains elevated by custom security primitives, incomplete test rigor, and operational recovery/security controls that are not yet enterprise-grade.
