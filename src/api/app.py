@@ -24,14 +24,6 @@ from src.services.system.cookieexpiry import (
     cookie_expiry_service_loop,
     is_cookie_expiry_service_enabled,
 )
-from src.services.system.cache.ipblockcache import (
-    ip_block_cache_service_loop,
-    is_ip_block_cache_service_enabled,
-)
-from src.services.system.cache.ratelimitcache import (
-    ratelimit_cache_service_loop,
-    is_ratelimit_cache_service_enabled,
-)
 from src.services.system.dbhealthcheck import (
     healthcheck_service_loop,
     is_healthcheck_service_enabled,
@@ -61,10 +53,6 @@ async def lifespan(app: fastapi.FastAPI):
         background_tasks.append(asyncio.create_task(healthcheck_service_loop(), name="db-healthcheck-service"))
     if is_cookie_expiry_service_enabled():
         background_tasks.append(asyncio.create_task(cookie_expiry_service_loop(), name="cookie-expiry-service"))
-    if is_ratelimit_cache_service_enabled():
-        background_tasks.append(asyncio.create_task(ratelimit_cache_service_loop(), name="ratelimit-cache-service"))
-    if is_ip_block_cache_service_enabled():
-        background_tasks.append(asyncio.create_task(ip_block_cache_service_loop(), name="ip-block-cache-service"))
 
     if background_tasks:
         log_message(f"[INFO] [{PRINT_PREFIX}] Started {len(background_tasks)} async background task(s).")
