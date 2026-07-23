@@ -32,13 +32,11 @@ async def create_key(request: Request, model: ApiKeyCreateRequest):
         rate_limit=model.rate_limit,
         email=model.email,
     )
-    key_hash = hash_token(token)
 
     return {
         "message": "API key created successfully.",
         "api_key": {
             "token": token,
-            "key_hash": key_hash,
             "permission_level": model.permission_level,
             "permission_name": PERM_LEVEL_MAP.get(model.permission_level, "UNKNOWN"),
             "rate_limit": model.rate_limit,
