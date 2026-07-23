@@ -4,7 +4,7 @@ Async FastAPI + PostgreSQL service for small-scale administrative database opera
 
 - API-key-protected system administration endpoints.
 - User account CRUD with password hashing and cookie-based login.
-- In-memory rate limiting for API keys, login attempts, cookie sessions, and IP blocking.
+- Redis-backed token-bucket rate limiting for API keys, login attempts, cookie sessions, and IP blocking (with in-process cache wrappers).
 - Background backup, cookie-expiry cleanup, DB healthcheck, and cache cleanup services.
 - PostgreSQL bootstrap and schema-migration helper scripts.
 
@@ -52,7 +52,7 @@ Primary code areas:
 - `src/models`: SQLAlchemy base, DB engine, table models, CRUD helpers.
 - `src/security`: API key auth, cookie auth, password auth, token utilities, IP blocking, rate limiting.
 - `src/services`: backup, DB healthcheck, cookie-expiry sweep, logging, cache cleanup.
-- `scripts`: PostgreSQL setup, API key bootstrap, schema migration.
+- `tools/scripts`: PostgreSQL setup, Redis setup, API key bootstrap, schema migration, and backup apply utilities.
 
 ## Configuration
 
@@ -85,10 +85,14 @@ Also supported:
 - `IP_BLOCKING_THRESHOLD`
 - `IP_BLOCKING_TIME_WINDOW`
 - `IP_BLOCKING_DURATION`
+- `TRUSTED_PROXIES`
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `REDIS_PASSWORD`
 
 Secret-safety behavior:
 
-- In non-development mode, unsafe defaults for PostgreSQL password, API-key pepper, password pepper, and JWT secret raise at startup.
+- In non-development mode, unsafe defaults for PostgreSQL password, API-key pepper, password pepper, JWT secret, and Redis password raise at startup.
 - In development mode, those unsafe defaults only log warnings.
 
 ## Service Runtime Config
@@ -107,10 +111,15 @@ Secret-safety behavior:
   - `shutdown_on_failure`
   - `leniency`
   - `interval`
+  - `reparations_interval`
   - `backup_dir`
-  - `healthcheck_subprocess_timeout_seconds`
+  - `healthcheck_timeout_seconds`
   - `restore_subprocess_timeout_seconds`
+  - `max_restore_attempts`
 - `setup_postgres`
+  - `command_subprocess_timeout_seconds`
+  - `probe_subprocess_timeout_seconds`
+- `setup_redis`
   - `command_subprocess_timeout_seconds`
   - `probe_subprocess_timeout_seconds`
 - `ratelimit_cache`
@@ -120,6 +129,10 @@ Secret-safety behavior:
 - `cookie_expiry`
   - `enabled`
   - `sweep_interval`
+- `ip_block_cache`
+  - `enabled`
+  - `sweep_interval`
+  - `max_inactive_seconds`
 
 ## Running Locally
 
@@ -189,19 +202,31 @@ Important request-format note:
 PostgreSQL setup:
 
 ```bash
-python3 -m scripts.setup_postgres
+python3 -m tools.scripts.setup_postgres
+```
+
+Redis setup:
+
+```bash
+python3 -m tools.scripts.setup_redis
 ```
 
 Generate a bootstrap API key:
 
 ```bash
-python3 -m scripts.generate_api_key <permission_level> <rate_limit>
+python3 -m tools.scripts.generate_api_key <permission_level> <rate_limit>
 ```
 
 Run schema-first migration copy/swap:
 
 ```bash
-python3 -m scripts.migrate_db
+python3 -m tools.scripts.migrate_db
+```
+
+Apply a SQL backup file:
+
+```bash
+python3 -m tools.scripts.apply_backup <backup_file_path>
 ```
 
 ## Logging
@@ -216,7 +241,7 @@ python3 -m scripts.migrate_db
 
 This repository is currently optimized for a single-node Linux deployment. The included PostgreSQL setup flow assumes Debian/Ubuntu-style package management and `systemd`.
 
-Reverse-proxy deployments should be treated carefully because IP blocking currently uses `request.client.host` directly and does not parse trusted forwarding headers.
+Reverse-proxy deployments should be configured carefully: trusted forwarding headers are only honored when the peer IP is listed in `TRUSTED_PROXIES`.
 
 ## Known Limitations
 
@@ -234,3 +259,4 @@ These are current design realities, not aspirational behavior:
 - Database reference: `docs/DB.md`
 - Expansion pattern: `docs/API_DB_FORMAT.md`
 - Full codebase review: `docs/CODEBASE_REPORT.md`
+- Security review: `docs/SECURITY_REPORT.md`
