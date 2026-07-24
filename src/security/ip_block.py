@@ -31,6 +31,8 @@ from src.services.system.cache.redis.client import RateLimitServiceUnavailable
 from src.services.system.cache.redis.client import RedisClient
 from src.services.system.logging import log_message
 
+PRINT_PREFIX = "IP BLOCK"
+
 
 def _ip_ratelimit_identifier(ip_address: str) -> str:
     return f"ip_block:{ip_address}"
@@ -58,7 +60,7 @@ def with_ip_block(func):
                 if blocked_until_time > now:
                     blocked_retry_after = blocked_until_time - now
             except ValueError:
-                log_message(f"[WARNING] [IP BLOCK] Invalid blocked_until value for IP {ip_address}: {blocked_until}")
+                log_message(f"[WARNING] [{PRINT_PREFIX}] Invalid blocked_until value for IP {ip_address}: {blocked_until}")
                 blocked_retry_after = float(IP_BLOCKING_DURATION)
                 pass
             
@@ -95,7 +97,7 @@ def with_ip_block(func):
         if blocked_retry_after is not None:
             if newly_blocked:
                 log_message(
-                    f"[WARNING] [IP BLOCK] IP blocked due to request burst. "
+                    f"[WARNING] [{PRINT_PREFIX}] IP blocked due to request burst. "
                     f"ip={ip_address} unblock_in={IP_BLOCKING_DURATION}s"
                 )
                 await safe_add_persistent_log(
