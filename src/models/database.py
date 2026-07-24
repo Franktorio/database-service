@@ -1,8 +1,5 @@
 # ~/src/models/database.py
 
-from src.models.base import Base
-import src.models.tables #ignore
-
 from config.loader import (
     DATABASE_URL,
     OPERATING_MODE,
@@ -14,7 +11,7 @@ from config.loader import (
 )
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy import text
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "DATABASE"
@@ -56,14 +53,10 @@ def with_session(func):
 
 
 async def init_db():
-    log_message(f"[INFO] [{PRINT_PREFIX}] Initializing database schema.")
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] SQLAlchemy engine echo is enabled for development visibility.")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        for table in Base.metadata.sorted_tables:
-            for index in table.indexes:
-                await conn.run_sync(lambda sync_conn, idx=index: idx.create(bind=sync_conn, checkfirst=True))
-    log_message(f"[INFO] [{PRINT_PREFIX}] Database schema initialization complete.")
+    log_message(f"[INFO] [{PRINT_PREFIX}] Initializing database engine.")
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+    log_message(f"[INFO] [{PRINT_PREFIX}] Database connectivity verified.")
 
 async def close_db():
     log_message(f"[INFO] [{PRINT_PREFIX}] Closing database engine.")
