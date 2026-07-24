@@ -26,12 +26,6 @@ from src.services.system.cache.ratelimitcache import (
 )
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
 
-
-def _key_fingerprint(api_key: str) -> str:
-    """Return a short non-reversible key fingerprint for safe logs."""
-    return hash_token(api_key)[:12]
-
-
 def _ratelimit_identifier(key_hash: str) -> str:
     return f"api_key:{key_hash}"
 
