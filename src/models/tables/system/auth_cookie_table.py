@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, func
+from sqlalchemy import DateTime, ForeignKey, Index, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.base import Base
@@ -17,7 +17,11 @@ class AuthCookie(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, init=False)
     token_hash: Mapped[str] = mapped_column(nullable=False, unique=True)
-    username: Mapped[str] = mapped_column(nullable=False, index=True)
+    username: Mapped[str] = mapped_column(
+        ForeignKey("users.username", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
