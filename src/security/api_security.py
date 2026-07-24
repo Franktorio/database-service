@@ -41,17 +41,6 @@ def _to_permission_payload(api_key: ApiKey) -> dict:
         "email": api_key.email,
     }
 
-
-async def refresh_ratelimiter(api_key: ApiKey) -> None:
-    """Refresh Redis cache entries for an API key after write operations."""
-    await place_in_redis(
-        _ratelimit_identifier(api_key.key_hash),
-        limit=api_key.rate_limit,
-        window=RATE_LIMIT_WINDOW_SECONDS,
-    )
-    await cache_permission_json(_permission_identifier(api_key.key_hash), _to_permission_payload(api_key))
-
-
 async def _get_api_permission_payload(key_hash: str) -> dict | None:
     cached = await get_cached_permission_json(_permission_identifier(key_hash))
     if cached is not None:
