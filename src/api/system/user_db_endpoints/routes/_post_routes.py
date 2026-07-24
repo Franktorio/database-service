@@ -5,7 +5,7 @@ from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.system.user_db_endpoints.models import UserCreateRequest
 from src.api.system.user_db_endpoints.routes.router import router
 from src.models.crud.system.user_crud import add_user, get_user_by_username
-from src.security.api_security import api_authentication
+from src.security.validation.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
 from src.services.system.logging import log_message

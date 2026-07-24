@@ -4,7 +4,7 @@ from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.system.user_db_endpoints.models import UserDeleteRequest
 from src.api.system.user_db_endpoints.routes.router import router
 from src.models.crud.system.user_crud import delete_user
-from src.security.api_security import api_authentication
+from src.security.validation.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.services.system.logging import log_message
 

@@ -4,7 +4,7 @@
 from fastapi import HTTPException
 
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
-from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
+from src.services.system.logging import log_message_for_ip
 from src.models.crud.system.user_crud import get_user_by_username
 from src.security.tokens import create_cookie_token
 from src.security.tokens import verify_password
@@ -83,29 +83,14 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
         configured_limit = int(permission_payload.get("login_rate_limit", LOGIN_ATTEMPTS_LIMIT))
         allowed, status = await _enforce_password_ratelimit(username, configured_limit)
     except PermissionServiceUnavailable:
-        await safe_add_persistent_log(
-            log_type="SERVICE",
-            log_level="ERROR",
-            message="Password permission cache unavailable: Redis is not reachable.",
-            ip_address=ip_address,
-        )
+        log_message_for_ip(ip_address, "User permissions cache unavailable.", "PASSWORD SECURITY", level="ERROR")
         raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
     except RateLimitServiceUnavailable:
-        await safe_add_persistent_log(
-            log_type="SERVICE",
-            log_level="ERROR",
-            message="Password rate limiter unavailable: Redis is not reachable.",
-            ip_address=ip_address,
-        )
+        log_message_for_ip(ip_address, "Password rate limiter unavailable: Redis is not reachable.", "PASSWORD SECURITY", level="ERROR")
         raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
 
     if not allowed:
-        await safe_add_persistent_log(
-            log_type="USER RATE LIMIT",
-            log_level="WARNING",
-            message=f"Password rate limit exceeded for username={username}. retry_after={status:.2f}s",
-            ip_address=ip_address,
-        )
+        log_message_for_ip(ip_address, f"Password rate limit exceeded for username={username}. retry_after={status:.2f}s", "PASSWORD SECURITY", level="WARNING")
         raise HTTPException(
             status_code=429,
             detail={"error": "Password rate limit exceeded.", "retry_after": status},
@@ -113,30 +98,15 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
 
     user = await get_user_by_username(username)
     if user is None:
-        await safe_add_persistent_log(
-            log_type="USER AUTH",
-            log_level="WARNING",
-            message=f"Password authentication failed: unknown username={username}",
-            ip_address=ip_address,
-        )
+        log_message_for_ip(ip_address, f"Password authentication failed: unknown username={username}", "PASSWORD SECURITY", level="WARNING")
         raise HTTPException(status_code=401, detail="Invalid username or password.")
 
     result = verify_password(password, user.password_hash, salt=user.password_salt, iterations=user.hash_iterations)
     if not result:
-        await safe_add_persistent_log(
-            log_type="USER AUTH",
-            log_level="WARNING",
-            message=f"Password authentication failed: invalid password for username={username}",
-            ip_address=ip_address,
-        )
+        log_message_for_ip(ip_address, f"Password authentication failed: invalid password for username={username}", "PASSWORD SECURITY", level="WARNING")
         raise HTTPException(status_code=401, detail="Invalid username or password.")
 
-    await safe_add_persistent_log(
-        log_type="USER AUTH",
-        log_level="INFO",
-        message=f"Password authentication accepted for username={username}",
-        ip_address=ip_address,
-    )
+    log_message_for_ip(ip_address, f"Password authentication accepted for username={username}", "PASSWORD SECURITY", level="INFO")
 
     return user
 

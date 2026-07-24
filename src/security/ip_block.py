@@ -16,7 +16,6 @@ from config.loader import (
     REDIS_IP_BLOCK_EX_SECONDS,
     TRUSTED_PROXIES,
 )
-from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.extract import extract_client_ip, extract_request_from_call
 from src.services.system.cache.ratelimitcache import (
     ALLOWED,
@@ -29,7 +28,7 @@ from src.services.system.cache.ratelimitcache import (
 )
 from src.services.system.cache.redis.client import RateLimitServiceUnavailable
 from src.services.system.cache.redis.client import RedisClient
-from src.services.system.logging import log_message
+from src.services.system.logging import log_message_for_ip
 
 PRINT_PREFIX = "IP BLOCK"
 
@@ -60,7 +59,7 @@ def with_ip_block(func):
                 if blocked_until_time > now:
                     blocked_retry_after = blocked_until_time - now
             except ValueError:
-                log_message(f"[WARNING] [{PRINT_PREFIX}] Invalid blocked_until value for IP {ip_address}: {blocked_until}")
+                log_message_for_ip(ip_address, f"Invalid blocked_until value for IP {ip_address}: {blocked_until}", PRINT_PREFIX, level="WARNING")
                 blocked_retry_after = float(IP_BLOCKING_DURATION)
                 pass
             
@@ -75,12 +74,7 @@ def with_ip_block(func):
                     )
                     result = await process_request(_ip_ratelimit_identifier(ip_address))
             except RateLimitServiceUnavailable:
-                await safe_add_persistent_log(
-                    log_type="SERVICE",
-                    log_level="ERROR",
-                    message="IP block limiter unavailable: Redis is not reachable.",
-                    ip_address=ip_address,
-                )
+                log_message_for_ip(ip_address, "IP block rate limiter unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
                 raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
 
             if result in (DENIED, TOO_SOON):
@@ -96,30 +90,21 @@ def with_ip_block(func):
 
         if blocked_retry_after is not None:
             if newly_blocked:
-                log_message(
-                    f"[WARNING] [{PRINT_PREFIX}] IP blocked due to request burst. "
-                    f"ip={ip_address} unblock_in={IP_BLOCKING_DURATION}s"
-                )
-                await safe_add_persistent_log(
-                    log_type="IP BLOCK",
-                    log_level="WARNING",
-                    message=(
-                        "IP blocked due to request burst. "
-                        f"unblock_in={IP_BLOCKING_DURATION}s"
-                    ),
-                    ip_address=ip_address,
+                log_message_for_ip(
+                    ip_address,
+                    f"IP blocked due to request burst. "
+                    f"ip={ip_address} unblock_in={IP_BLOCKING_DURATION}s",
+                    PRINT_PREFIX,
+                    level="WARNING",
                 )
             else:
-                await safe_add_persistent_log(
-                    log_type="IP BLOCK",
-                    log_level="WARNING",
-                    message=(
-                        "Blocked IP attempted request during active block. "
-                        f"retry_after={blocked_retry_after:.2f}s"
-                    ),
-                    ip_address=ip_address,
+                log_message_for_ip(
+                    ip_address,
+                    f"IP temporarily blocked. "
+                    f"ip={ip_address} retry_after={blocked_retry_after:.2f}s",
+                    PRINT_PREFIX,
+                    level="WARNING",
                 )
-
             raise HTTPException(
                 status_code=429,
                 detail={"error": "IP temporarily blocked.", "retry_after": blocked_retry_after},

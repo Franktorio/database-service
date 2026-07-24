@@ -13,7 +13,7 @@ from src.models.crud.system.user_crud import (
     update_user_login_rate_limit,
     update_user_password,
 )
-from src.security.api_security import api_authentication
+from src.security.validation.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
 from src.services.system.logging import log_message

@@ -5,7 +5,7 @@ from fastapi import HTTPException, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
 from src.security.tokens import create_api_key
-from src.security.api_security import api_authentication
+from src.security.validation.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.api.system.api_db_endpoints.models import ApiKeyCreateRequest, ApiKeyUpdateRequest
 from src.models.crud.system.api_key_crud import update_api_key

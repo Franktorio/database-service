@@ -1,11 +1,11 @@
-from functools import wraps
 
+from functools import wraps
 from fastapi import HTTPException
 
 from config.loader import RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import PERM_LEVEL_MAP
+from src.services.system.logging import log_message_for_ip
 from src.models.crud.system.api_key_crud import get_api_key
-from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.tables.system.api_key_table import ApiKey
 from src.security.extract import extract_bearer_token, extract_client_ip, extract_request_from_call
 from src.security.tokens import hash_token
@@ -24,6 +24,8 @@ from src.services.system.cache.ratelimitcache import (
     process_request,
 )
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
+
+PRINT_PREFIX = "API AUTH"
 
 def _ratelimit_identifier(key_hash: str) -> str:
     return f"api_key:{key_hash}"
@@ -87,12 +89,7 @@ def api_authentication(permission_level: int, too_soon_window_seconds: int | Non
             ip_address = extract_client_ip(request)
             api_key = extract_bearer_token(request)
             if not api_key:
-                await safe_add_persistent_log(
-                    log_type="API AUTH",
-                    log_level="WARNING",
-                    message="API authentication failed: missing/invalid Authorization Bearer token",
-                    ip_address=ip_address,
-                )
+                log_message_for_ip(ip_address, "Missing or invalid Authorization header.", PRINT_PREFIX, level="WARNING")
                 raise HTTPException(
                     status_code=401,
                     detail="Missing or invalid Authorization header. Expected: Bearer <api_key>",
@@ -104,12 +101,7 @@ def api_authentication(permission_level: int, too_soon_window_seconds: int | Non
             try:
                 permission_payload = await _get_api_permission_payload(key_hash)
                 if permission_payload is None:
-                    await safe_add_persistent_log(
-                        log_type="API AUTH",
-                        log_level="WARNING",
-                        message=f"API key not registered. fingerprint={fingerprint}",
-                        ip_address=ip_address,
-                    )
+                    log_message_for_ip(ip_address, "API key is not registered.", PRINT_PREFIX, level="WARNING")
                     raise HTTPException(status_code=403, detail="API key is not registered.")
 
                 allowed, retry_after = await _check_ratelimit(
@@ -119,12 +111,7 @@ def api_authentication(permission_level: int, too_soon_window_seconds: int | Non
                     too_soon_window_seconds=too_soon_window_seconds,
                 )
                 if not allowed:
-                    await safe_add_persistent_log(
-                        log_type="API RATE LIMIT",
-                        log_level="WARNING",
-                        message=f"API rate limit exceeded. fingerprint={fingerprint} retry_after={retry_after:.2f}s",
-                        ip_address=ip_address,
-                    )
+                    log_message_for_ip(ip_address, f"Rate limit exceeded. Retry after {retry_after} seconds.", PRINT_PREFIX, level="WARNING")
                     raise HTTPException(
                         status_code=429,
                         detail={"error": "Rate limit exceeded.", "retry_after": retry_after},
@@ -132,15 +119,7 @@ def api_authentication(permission_level: int, too_soon_window_seconds: int | Non
 
                 effective_level = int(permission_payload.get("permission_level", -1))
                 if effective_level < permission_level:
-                    await safe_add_persistent_log(
-                        log_type="API AUTH",
-                        log_level="WARNING",
-                        message=(
-                            "Insufficient API permissions. "
-                            f"fingerprint={fingerprint} required={permission_level} found={effective_level}"
-                        ),
-                        ip_address=ip_address,
-                    )
+                    log_message_for_ip(ip_address, "Insufficient permissions.", PRINT_PREFIX, level="WARNING")
                     raise HTTPException(status_code=403, detail="Insufficient permissions.")
 
                 api_data = {
@@ -154,12 +133,7 @@ def api_authentication(permission_level: int, too_soon_window_seconds: int | Non
                     request._api_data = api_data
                 return await func(*args, **kwargs)
             except (RateLimitServiceUnavailable, PermissionServiceUnavailable):
-                await safe_add_persistent_log(
-                    log_type="SERVICE",
-                    log_level="ERROR",
-                    message="Redis-backed auth cache unavailable.",
-                    ip_address=ip_address,
-                )
+                log_message_for_ip(ip_address, "Authorization cache unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
                 raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
 
         return wrapper

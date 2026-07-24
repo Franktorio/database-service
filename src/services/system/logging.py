@@ -82,6 +82,11 @@ def log_message(*args: Any, **kwargs: Any) -> None:
         _log_queue.put_nowait(message)
     except queue.Full:
         pass
+    
+def log_message_for_ip(ip_address: str, message: str, prefix: str, level: str = "INFO") -> None:
+    """Log a message with an IP address context."""
+    log_message(f"[{level}] [{prefix}] {message} ip={ip_address}")
+
 
 def _log_message_worker():
     logger = _build_logger()

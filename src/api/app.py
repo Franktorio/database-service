@@ -14,10 +14,10 @@ from src.api.system.user_db_endpoints import routes as user_db_routes
 from src.services.system.cache.redis.client import RedisClient
 
 
-from src.security.api_security import api_authentication
+from src.security.validation.api_security import api_authentication
 from src.security.ip_block import with_ip_block
-from src.security.password_security import auth_and_grant_token
-from src.security.cookie_security import cookie_authentication
+from src.security.validation.password_security import auth_and_grant_token
+from src.security.validation.cookie_security import cookie_authentication
 from src.security.tokens import get_cookie_settings
 from src.models.database import init_db, close_db
 from src.services.system.cookieexpiry import (

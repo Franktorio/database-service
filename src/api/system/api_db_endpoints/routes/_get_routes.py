@@ -5,7 +5,7 @@ from fastapi import Request
 from src.api.system.api_db_endpoints.routes.router import router
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
-from src.security.api_security import api_authentication
+from src.security.validation.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.models.crud.system.api_key_crud import get_api_keys
 from src.services.system.logging import log_message

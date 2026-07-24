@@ -8,9 +8,9 @@ from starlette.responses import Response
 
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
+from src.services.system.logging import log_message_for_ip
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.models.crud.system.user_crud import get_user_by_username
-from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.extract import extract_client_ip, extract_cookie_value
 from src.security.tokens import decode_jwt_token, hash_token
 from src.services.system.logging import log_message
@@ -84,36 +84,21 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
             client_ip = extract_client_ip(request)
             cookie_token = extract_cookie_value(request, COOKIE_JWT_INDEX)
             if not cookie_token:
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message="Cookie authentication failed: missing cookie token",
-                    ip_address=client_ip,
-                )
+                log_message_for_ip(client_ip, "Missing cookie token.", "COOKIE SECURITY", level="WARNING")
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Missing cookie token.")
 
             token_payload = decode_jwt_token(cookie_token)
             if token_payload is None:
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message="Cookie authentication failed: invalid JWT payload",
-                    ip_address=client_ip,
-                )
+                log_message_for_ip(client_ip, "Cookie authentication failed: invalid JWT payload", "COOKIE SECURITY", level="WARNING")
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token.")
 
             username_claim = token_payload.get("username")
             if not isinstance(username_claim, str) or not username_claim.strip():
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message="Cookie authentication failed: missing username claim",
-                    ip_address=client_ip,
-                )
+                log_message_for_ip(client_ip, "Cookie authentication failed: missing username claim", "COOKIE SECURITY", level="WARNING")
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
@@ -122,23 +107,16 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
             try:
                 allowed, status = await _ensure_cookie_ratelimit(token_hash)
             except RateLimitServiceUnavailable:
-                await safe_add_persistent_log(
-                    log_type="SERVICE",
-                    log_level="ERROR",
-                    message="Cookie rate limiter unavailable: Redis is not reachable.",
-                    ip_address=client_ip,
-                )
+                log_message_for_ip(client_ip, "Cookie rate limiter unavailable: Redis is not reachable.", "COOKIE SECURITY", level="ERROR")
                 raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
 
             if not allowed:
-                await safe_add_persistent_log(
-                    log_type="USER RATE LIMIT",
-                    log_level="WARNING",
-                    message=(
-                        "Cookie rate limit exceeded "
-                        f"username={username_claim} retry_after={status:.2f}s"
-                    ),
-                    ip_address=client_ip,
+                log_message_for_ip(
+                    client_ip,
+                    "Cookie rate limit exceeded "
+                    f"username={username_claim} retry_after={status:.2f}s",
+                    "COOKIE SECURITY",
+                    level="WARNING",
                 )
                 raise HTTPException(
                     status_code=429,
@@ -147,31 +125,31 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
 
             cookie_row = await get_auth_cookie_by_hash(token_hash)
             if cookie_row is None:
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message=f"Cookie authentication failed: unregistered token hash={token_hash[:12]}",
-                    ip_address=client_ip,
+                log_message_for_ip(
+                    client_ip,
+                    f"Cookie authentication failed: unregistered token hash={token_hash[:12]}",
+                    "COOKIE SECURITY",
+                    level="WARNING",
                 )
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token is not registered.")
             if cookie_row.revoked:
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message=f"Cookie authentication failed: revoked token hash={token_hash[:12]}",
-                    ip_address=client_ip,
+                log_message_for_ip(
+                    client_ip,
+                    f"Cookie authentication failed: revoked token hash={token_hash[:12]}",
+                    "COOKIE SECURITY",
+                    level="WARNING",
                 )
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token has been revoked.")
             if cookie_row.expires_at <= datetime.now(timezone.utc):
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message=f"Cookie authentication failed: expired token hash={token_hash[:12]}",
-                    ip_address=client_ip,
+                log_message_for_ip(
+                    client_ip,
+                    f"Cookie authentication failed: expired token hash={token_hash[:12]}",
+                    "COOKIE SECURITY",
+                    level="WARNING",
                 )
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
@@ -179,12 +157,7 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
 
             username = cookie_row.username
             if username != username_claim:
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message="Cookie authentication failed: username claim mismatch.",
-                    ip_address=client_ip,
-                )
+                log_message_for_ip(client_ip, "Cookie authentication failed: username claim mismatch.", "COOKIE SECURITY", level="WARNING")
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
@@ -192,20 +165,15 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
             try:
                 permissions = await _resolve_user_permissions(username)
             except PermissionServiceUnavailable:
-                await safe_add_persistent_log(
-                    log_type="SERVICE",
-                    log_level="ERROR",
-                    message="User permissions cache unavailable.",
-                    ip_address=client_ip,
-                )
+                log_message_for_ip(client_ip, "User permissions cache unavailable.", "COOKIE SECURITY", level="ERROR")
                 raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
 
             if permissions is None:
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message=f"Cookie authentication failed: user not found username={username}",
-                    ip_address=client_ip,
+                log_message_for_ip(
+                    client_ip,
+                    f"Cookie authentication failed: user not found username={username}",
+                    "COOKIE SECURITY",
+                    level="WARNING",
                 )
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
@@ -214,15 +182,13 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
             roles = permissions.get("roles") or []
             effective_role = str(permissions.get("role") or (roles[0] if roles else "")).lower()
             if normalized_roles and effective_role not in normalized_roles:
-                await safe_add_persistent_log(
-                    log_type="USER AUTH",
-                    log_level="WARNING",
-                    message=(
-                        "Cookie authentication failed: insufficient role "
-                        f"username={username} required_roles={sorted(normalized_roles)} "
-                        f"found_role={effective_role}"
-                    ),
-                    ip_address=client_ip,
+                log_message_for_ip(
+                    client_ip,
+                    "Cookie authentication failed: insufficient role "
+                    f"username={username} required_roles={sorted(normalized_roles)} "
+                    f"found_role={effective_role}",
+                    "COOKIE SECURITY",
+                    level="WARNING",
                 )
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
@@ -237,18 +203,11 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                 "seconds_since_last_request": 0.0,
             }
 
-            log_message(
-                f"[DEBUG] [COOKIE SECURITY] Cookie auth accepted for user "
-                f"{request._cookie_data['username']} with role {effective_role}."
-            )
-            await safe_add_persistent_log(
-                log_type="USER AUTH",
-                log_level="INFO",
-                message=(
-                    "Cookie authentication accepted "
-                    f"username={request._cookie_data['username']} role={effective_role}"
-                ),
-                ip_address=client_ip,
+            log_message_for_ip(
+                client_ip,
+                f"Cookie authentication accepted username={username} role={effective_role} token_hash={token_hash[:12]}",
+                "COOKIE SECURITY",
+                level="INFO",
             )
 
             response = await func(request, *args, **kwargs)
