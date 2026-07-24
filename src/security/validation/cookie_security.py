@@ -103,6 +103,13 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
 
+            user_id_claim = token_payload.get("user_id")
+            if user_id_claim is not None and not isinstance(user_id_claim, int):
+                log_message_for_ip(client_ip, "Cookie authentication failed: invalid user_id claim", "COOKIE SECURITY", level="WARNING")
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
+                raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
+
             token_hash = hash_token(cookie_token)
             try:
                 allowed, status = await _ensure_cookie_ratelimit(token_hash)
@@ -158,6 +165,12 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
             username = cookie_row.username
             if username != username_claim:
                 log_message_for_ip(client_ip, "Cookie authentication failed: username claim mismatch.", "COOKIE SECURITY", level="WARNING")
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
+                raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
+
+            if user_id_claim is not None and cookie_row.user_id != user_id_claim:
+                log_message_for_ip(client_ip, "Cookie authentication failed: user_id claim mismatch.", "COOKIE SECURITY", level="WARNING")
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token payload.")

@@ -22,6 +22,7 @@ from config.loader import (
 from src.api.config import COOKIE_JWT_INDEX
 from src.models.crud.system.api_key_crud import add_api_key, get_api_key
 from src.models.crud.system.auth_cookie_crud import add_auth_cookie
+from src.models.crud.system.user_crud import get_user_by_username
 from src.services.system.logging import log_message
 
 
@@ -90,6 +91,7 @@ def verify_password(
 def create_jwt_token(
     username: str,
     role: str,
+    user_id: int | None = None,
     expires_minutes: int = JWT_EXP_MINUTES,
 ) -> tuple[str, datetime]:
     """Create a signed JWT token for cookie authentication."""
@@ -104,6 +106,8 @@ def create_jwt_token(
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
+    if user_id is not None:
+        payload["user_id"] = user_id
     header = {"alg": "HS256", "typ": "JWT"}
     header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
@@ -153,15 +157,21 @@ async def create_cookie_token(
     expires_minutes: int = JWT_EXP_MINUTES,
 ) -> str:
     """Create a JWT token and persist a hash for revocation/rate-limiting checks."""
+    user = await get_user_by_username(username)
+    if user is None:
+        log_message(f"[WARNING] [API KEYS] Cannot create cookie token for unknown user {username}.")
+        raise ValueError("Cannot create cookie token for unknown user.")
+
     token, expires_at = create_jwt_token(
-        username=username,
+        username=user.username,
         role=role,
+        user_id=user.id,
         expires_minutes=expires_minutes,
     )
     token_hash = hash_token(token)
     await add_auth_cookie(
         token_hash=token_hash,
-        username=username,
+        user=user,
         expires_at=expires_at,
     )
     return token

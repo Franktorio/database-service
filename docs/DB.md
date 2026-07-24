@@ -132,7 +132,8 @@ Key fields:
 
 - id: integer PK.
 - token_hash: unique, non-null.
-- username: non-null, indexed.
+- username: non-null, indexed, FK to users.username (ON DELETE CASCADE).
+- user_id: non-null, indexed, FK to users.id (ON DELETE CASCADE).
 - expires_at: timezone-aware, non-null.
 - revoked: non-null boolean, default false.
 - created_at: timezone-aware server_default now().
@@ -141,13 +142,13 @@ Indexes:
 
 - Unique token_hash.
 - Single-column username index.
+- Single-column user_id index.
 - Composite index on expires_at, revoked.
 
-Design caveats:
+Design notes:
 
-- username is not declared as a foreign key to users.username.
-- Referential integrity is therefore application-enforced, not database-enforced.
-- Inconsistency windows are possible during partial failures or manual SQL manipulation.
+- Cookie ownership now has database-enforced referential integrity via username and user_id FKs.
+- ON DELETE CASCADE keeps auth_cookies consistent when a user row is removed.
 
 ### persistent_logs
 

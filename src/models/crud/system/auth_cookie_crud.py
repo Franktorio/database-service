@@ -6,6 +6,7 @@ from sqlalchemy import delete, select, update
 from src.models.database import with_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.tables.system.auth_cookie_table import AuthCookie
+from src.models.tables.system.user_table import User
 from src.services.system.cache.permissionscache import remove_cached_permission_json
 from src.services.system.cache.ratelimitcache import remove_from_redis
 from src.services.system.logging import log_message
@@ -55,14 +56,15 @@ async def _invalidate_after_refresh_auth_cookie(result, *args, **kwargs) -> None
 @with_session
 async def add_auth_cookie(
     token_hash: str,
-    username: str,
+    user: User,
     expires_at: datetime,
     session: AsyncSession | None = None,
 ) -> AuthCookie:
     """Add a cookie JWT tracking row."""
     auth_cookie = AuthCookie(
         token_hash=token_hash,
-        username=username,
+        username=user.username,
+        user_id=user.id,
         expires_at=expires_at,
     )
     session.add(auth_cookie)
@@ -83,6 +85,18 @@ async def get_auth_cookie_by_hash(token_hash: str, session: AsyncSession | None 
         log_message(f"[WARNING] [{PRINT_PREFIX}] Auth cookie not found for provided hash.")
 
     return row
+
+
+@with_session
+async def get_auth_cookies_by_uid(user_id: int, session: AsyncSession | None = None) -> list[AuthCookie]:
+    """Fetch all cookie JWT tracking rows for a specific user ID."""
+    stmt = select(AuthCookie).where(AuthCookie.user_id == user_id)
+    result = await session.execute(stmt)
+    rows = result.scalars().all()
+    if not rows:
+        log_message(f"[INFO] [{PRINT_PREFIX}] No auth cookies found for user ID {user_id}.")
+
+    return rows
 
 
 @with_session
