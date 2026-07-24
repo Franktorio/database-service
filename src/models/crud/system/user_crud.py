@@ -2,6 +2,7 @@
 
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from functools import wraps
 from src.models.database import with_session
 from src.models.crud.system.auth_cookie_crud import delete_auth_cookies_by_username
 from src.models.tables.system.user_table import User
@@ -17,6 +18,24 @@ async def _invalidate_user_cache(username: str) -> None:
     await remove_from_redis(f"password:{username}")
 
 
+def cache_invalidating(func):
+    """Decorator to invalidate user-related caches after write operations."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        result = await func(*args, **kwargs)
+        if isinstance(result, User):
+            await _invalidate_user_cache(result.username)
+        elif result is True:
+            username = kwargs.get("username")
+            if username is None and args:
+                username = args[0]
+            if isinstance(username, str):
+                await _invalidate_user_cache(username)
+        return result
+    return wrapper
+
+
+@cache_invalidating
 @with_session
 async def add_user(
     username: str,
@@ -48,7 +67,6 @@ async def add_user(
     session.add(user)
     await session.commit()
     await session.refresh(user)
-    await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] User row created with id {user.id}.")
 
     return user
@@ -79,6 +97,7 @@ async def get_user_by_username(username: str, session: AsyncSession | None = Non
     return user
 
 
+@cache_invalidating
 @with_session
 async def update_user(
     username: str,
@@ -141,12 +160,12 @@ async def update_user(
 
     await session.commit()
     await session.refresh(user)
-    await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated user {username}.")
 
     return user
 
 
+@cache_invalidating
 @with_session
 async def delete_user(username: str, session: AsyncSession | None = None) -> bool:
     """Delete a user by their username."""
@@ -157,8 +176,6 @@ async def delete_user(username: str, session: AsyncSession | None = None) -> boo
     await session.commit()
     deleted = result.rowcount > 0
     if deleted:
-        await _invalidate_user_cache(username)
-    if deleted:
         log_message(f"[INFO] [{PRINT_PREFIX}] Deleted user {username}.")
     else:
         log_message(f"[WARNING] [{PRINT_PREFIX}] No user found to delete: {username}.")
@@ -166,6 +183,7 @@ async def delete_user(username: str, session: AsyncSession | None = None) -> boo
     return deleted
 
 
+@cache_invalidating
 @with_session
 async def update_user_password(
     username: str,
@@ -192,12 +210,12 @@ async def update_user_password(
 
     await session.commit()
     await session.refresh(user)
-    await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated password metadata for user {username}.")
 
     return user
 
 
+@cache_invalidating
 @with_session
 async def update_user_login_rate_limit(
     username: str,
@@ -216,7 +234,6 @@ async def update_user_login_rate_limit(
     user.login_rate_limit = new_login_rate_limit
     await session.commit()
     await session.refresh(user)
-    await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated login rate limit for user {username}.")
 
     return user

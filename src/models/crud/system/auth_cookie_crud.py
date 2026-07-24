@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from functools import wraps
 
 from sqlalchemy import delete, select, update
 
@@ -20,6 +21,37 @@ async def _invalidate_user_permission_cache(username: str) -> None:
     await remove_cached_permission_json(f"user:{username}")
 
 
+def cache_invalidating(invalidator):
+    """Decorator factory to invalidate auth cookie caches after write operations."""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            result = await func(*args, **kwargs)
+            await invalidator(result, *args, **kwargs)
+            return result
+        return wrapper
+    return decorator
+
+
+async def _invalidate_after_add_auth_cookie(result, *args, **kwargs) -> None:
+    if isinstance(result, AuthCookie):
+        await _invalidate_cookie_cache(result.token_hash)
+        await _invalidate_user_permission_cache(result.username)
+
+
+async def _invalidate_after_refresh_auth_cookie(result, *args, **kwargs) -> None:
+    if not isinstance(result, AuthCookie):
+        return
+    old_token_hash = kwargs.get("token_hash")
+    if old_token_hash is None and args:
+        old_token_hash = args[0]
+    if isinstance(old_token_hash, str):
+        await _invalidate_cookie_cache(old_token_hash)
+    await _invalidate_cookie_cache(result.token_hash)
+    await _invalidate_user_permission_cache(result.username)
+
+
+@cache_invalidating(_invalidate_after_add_auth_cookie)
 @with_session
 async def add_auth_cookie(
     token_hash: str,
@@ -36,8 +68,6 @@ async def add_auth_cookie(
     session.add(auth_cookie)
     await session.commit()
     await session.refresh(auth_cookie)
-    await _invalidate_cookie_cache(token_hash)
-    await _invalidate_user_permission_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Auth cookie row created with id {auth_cookie.id}.")
 
     return auth_cookie
@@ -74,6 +104,7 @@ async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = Non
     return True
 
 
+@cache_invalidating(_invalidate_after_refresh_auth_cookie)
 @with_session
 async def refresh_auth_cookie(
     token_hash: str,
@@ -92,12 +123,8 @@ async def refresh_auth_cookie(
     row.token_hash = new_token_hash
     row.expires_at = new_expires_at
     row.revoked = False
-    old_token_hash = token_hash
     await session.commit()
     await session.refresh(row)
-    await _invalidate_cookie_cache(old_token_hash)
-    await _invalidate_cookie_cache(new_token_hash)
-    await _invalidate_user_permission_cache(row.username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Refreshed auth cookie row id {row.id}.")
 
     return row

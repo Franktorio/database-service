@@ -2,6 +2,7 @@
 
 from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from functools import wraps
 from src.models.database import with_session
 from src.models.tables.system.api_key_table import ApiKey
 from src.services.system.cache.permissionscache import remove_cached_permission_json
@@ -14,8 +15,24 @@ PRINT_PREFIX = "API KEY CRUD"
 async def _invalidate_api_key_cache(key_hash: str) -> None:
     await remove_from_redis(f"api_key:{key_hash}")
     await remove_cached_permission_json(f"api_key:{key_hash}")
+    
+def cache_invalidating(func):
+    """Decorator to invalidate cache after API key operations."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        result = await func(*args, **kwargs)
+        if isinstance(result, ApiKey):
+            await _invalidate_api_key_cache(result.key_hash)
+        elif result is True:
+            key_hash = kwargs.get("key_hash")
+            if key_hash is None and args:
+                key_hash = args[0]
+            if isinstance(key_hash, str):
+                await _invalidate_api_key_cache(key_hash)
+        return result
+    return wrapper
 
-
+@cache_invalidating
 @with_session
 async def add_api_key(
     key_hash: str,
@@ -31,7 +48,6 @@ async def add_api_key(
     session.add(api_key)
     await session.commit()
     await session.refresh(api_key)
-    await _invalidate_api_key_cache(key_hash)
     log_message(f"[INFO] [{PRINT_PREFIX}] API key row created with id {api_key.id}.")
 
     return api_key
@@ -60,7 +76,7 @@ async def get_api_keys(session: AsyncSession | None = None) -> list[ApiKey]:
 
     return api_keys
 
-
+@cache_invalidating
 @with_session
 async def delete_api_key(key_hash: str, session: AsyncSession | None = None) -> bool:
     """Delete an API key by its hash."""
@@ -69,8 +85,6 @@ async def delete_api_key(key_hash: str, session: AsyncSession | None = None) -> 
     await session.commit()
     deleted = result.rowcount > 0
     if deleted:
-        await _invalidate_api_key_cache(key_hash)
-    if deleted:
         log_message(f"[INFO] [{PRINT_PREFIX}] Deleted API key for provided hash.")
     else:
         log_message(f"[WARNING] [{PRINT_PREFIX}] No API key found to delete for provided hash.")
@@ -78,6 +92,7 @@ async def delete_api_key(key_hash: str, session: AsyncSession | None = None) -> 
     return deleted
 
 
+@cache_invalidating
 @with_session
 async def update_api_key(
     key_hash: str,
@@ -104,7 +119,6 @@ async def update_api_key(
     if updated_api_key is None:
         log_message(f"[WARNING] [{PRINT_PREFIX}] API key update skipped; key not found.")
     else:
-        await _invalidate_api_key_cache(key_hash)
         log_message(f"[INFO] [{PRINT_PREFIX}] Updated API key id {updated_api_key.id}.")
 
     return updated_api_key
