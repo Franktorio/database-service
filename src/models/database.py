@@ -36,6 +36,25 @@ SessionLocal = async_sessionmaker(
     expire_on_commit=False,
 )
 
+def with_session(func):
+    async def wrapper(*args, **kwargs):
+        session = kwargs.get("session")
+        close_session = False
+        if session is None:
+            session = SessionLocal()
+            kwargs["session"] = session
+            close_session = True
+
+        try:
+            result = await func(*args, **kwargs)
+            return result
+        finally:
+            if close_session:
+                await session.close()
+
+    return wrapper
+
+
 async def init_db():
     log_message(f"[INFO] [{PRINT_PREFIX}] Initializing database schema.")
     log_message(f"[DEBUG] [{PRINT_PREFIX}] SQLAlchemy engine echo is enabled for development visibility.")

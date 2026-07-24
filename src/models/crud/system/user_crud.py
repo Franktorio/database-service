@@ -2,7 +2,7 @@
 
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.models.database import SessionLocal
+from src.models.database import with_session
 from src.models.crud.system.auth_cookie_crud import delete_auth_cookies_by_username
 from src.models.tables.system.user_table import User
 from src.services.system.cache.permissionscache import remove_cached_permission_json
@@ -16,6 +16,8 @@ async def _invalidate_user_cache(username: str) -> None:
     await remove_cached_permission_json(f"user:{username}")
     await remove_from_redis(f"password:{username}")
 
+
+@with_session
 async def add_user(
     username: str,
     password_hash: str,
@@ -33,11 +35,6 @@ async def add_user(
         raise ValueError("User creation requires a non-empty role.")
 
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Adding user {username} with role {initial_role}.")
-    close_session = False
-    if session is None:
-        session = SessionLocal()
-        close_session = True
-
     user = User(
         username=username,
         password_hash=password_hash,
@@ -54,48 +51,35 @@ async def add_user(
     await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] User row created with id {user.id}.")
 
-    if close_session:
-        await session.close()
-
     return user
 
+
+@with_session
 async def get_users(session: AsyncSession | None = None) -> list[User]:
     """Fetch all users."""
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Fetching all users.")
-    close_session = False
-    if session is None:
-        session = SessionLocal()
-        close_session = True
-
     stmt = select(User).order_by(User.username)
     result = await session.execute(stmt)
     users = result.scalars().all()
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Retrieved {len(users)} user rows.")
 
-    if close_session:
-        await session.close()
-
     return users
 
+
+@with_session
 async def get_user_by_username(username: str, session: AsyncSession | None = None) -> User | None:
     """Fetch a user by their username."""
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Fetching user by username: {username}.")
-    close_session = False
-    if session is None:
-        session = SessionLocal()
-        close_session = True
-
     stmt = select(User).where(User.username == username)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
     if user is None:
         log_message(f"[WARNING] [{PRINT_PREFIX}] User not found: {username}.")
 
-    if close_session:
-        await session.close()
-
     return user
-    
+
+
+@with_session
 async def update_user(
     username: str,
     new_email: str | None = None,
@@ -106,18 +90,11 @@ async def update_user(
 ) -> User | None:
     """Update a user's email and/or roles."""
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating user {username}.")
-    close_session = False
-    if session is None:
-        session = SessionLocal()
-        close_session = True
-
     stmt = select(User).where(User.username == username)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
     if user is None:
         log_message(f"[WARNING] [{PRINT_PREFIX}] User not found for update: {username}.")
-        if close_session:
-            await session.close()
         return None
     await delete_auth_cookies_by_username(username, session=session)
     if new_email is not None:
@@ -167,19 +144,13 @@ async def update_user(
     await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated user {username}.")
 
-    if close_session:
-        await session.close()
-
     return user
 
+
+@with_session
 async def delete_user(username: str, session: AsyncSession | None = None) -> bool:
     """Delete a user by their username."""
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Deleting user {username}.")
-    close_session = False
-    if session is None:
-        session = SessionLocal()
-        close_session = True
-
     await delete_auth_cookies_by_username(username, session=session)
     stmt = delete(User).where(User.username == username)
     result = await session.execute(stmt)
@@ -192,12 +163,10 @@ async def delete_user(username: str, session: AsyncSession | None = None) -> boo
     else:
         log_message(f"[WARNING] [{PRINT_PREFIX}] No user found to delete: {username}.")
 
-    if close_session:
-        await session.close()
-
     return deleted
 
 
+@with_session
 async def update_user_password(
     username: str,
     new_password_hash: str,
@@ -208,18 +177,11 @@ async def update_user_password(
 ) -> User | None:
     """Update a user's password hash metadata."""
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating password for user {username}.")
-    close_session = False
-    if session is None:
-        session = SessionLocal()
-        close_session = True
-
     stmt = select(User).where(User.username == username)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
     if user is None:
         log_message(f"[WARNING] [{PRINT_PREFIX}] User not found for password update: {username}.")
-        if close_session:
-            await session.close()
         return None
     # Delete all auth cookies for the user before updating the password
     await delete_auth_cookies_by_username(username, session=session)
@@ -233,12 +195,10 @@ async def update_user_password(
     await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated password metadata for user {username}.")
 
-    if close_session:
-        await session.close()
-
     return user
 
 
+@with_session
 async def update_user_login_rate_limit(
     username: str,
     new_login_rate_limit: int,
@@ -246,18 +206,11 @@ async def update_user_login_rate_limit(
 ) -> User | None:
     """Update a user's login rate limit."""
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating login rate limit for user {username}.")
-    close_session = False
-    if session is None:
-        session = SessionLocal()
-        close_session = True
-
     stmt = select(User).where(User.username == username)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
     if user is None:
         log_message(f"[WARNING] [{PRINT_PREFIX}] User not found for login limit update: {username}.")
-        if close_session:
-            await session.close()
         return None
 
     user.login_rate_limit = new_login_rate_limit
@@ -265,8 +218,5 @@ async def update_user_login_rate_limit(
     await session.refresh(user)
     await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated login rate limit for user {username}.")
-
-    if close_session:
-        await session.close()
 
     return user
