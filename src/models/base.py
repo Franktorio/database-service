@@ -1,6 +1,5 @@
 # ~/src/models/base.py
 from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
-from sqlalchemy.ext.asyncio import AsyncSession
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "MODEL BASE"
