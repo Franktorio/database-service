@@ -18,13 +18,15 @@ _client = redis.Redis(
 class RedisClient:
     """
     Redis client for interacting with the Redis server asynchronously.
+    It's a static class that provides methods to set, get, delete, and check existence of keys in Redis.
+    It also provides a method to ping the Redis server to check its availability.
     """
 
     @staticmethod
-    async def set(key: str, value: str, expire: int = None) -> None:
+    async def set(key: str, value: str, ex: int | None = None) -> None:
         """Set a value in Redis with an optional expiration time."""
         try:
-            await _client.set(key, value, ex=expire)
+            await _client.set(key, value, ex=ex)
         except Exception as exc:
             raise RedisConnectionError(str(exc)) from exc
 
@@ -62,10 +64,26 @@ class RedisClient:
             return False
 
     @staticmethod
-    async def eval(script: str, numkeys: int, *keys_and_args: str):
+    async def eval(
+        script: str,
+        keys: list[str] | None = None,
+        args: list[str | int | float | None] | None = None,
+    ):
         """Execute a Lua script in Redis."""
+        redis_keys = keys or []
+        redis_args = ["" if value is None else str(value) for value in (args or [])]
         try:
-            return await _client.eval(script, numkeys, *keys_and_args)
+            return await _client.eval(script, len(redis_keys), *redis_keys, *redis_args)
+        except Exception as exc:
+            raise RedisConnectionError(str(exc)) from exc
+        
+    @staticmethod
+    async def hset(key: str, ex: int | None = None, **kwargs) -> None:
+        """Set multiple hash fields in Redis."""
+        try:
+            await _client.hset(key, mapping=kwargs)
+            if ex is not None:
+                await _client.expire(key, ex)
         except Exception as exc:
             raise RedisConnectionError(str(exc)) from exc
 
@@ -73,3 +91,9 @@ class RedisClient:
     async def close() -> None:
         """Close the Redis client and connection pool."""
         await _client.aclose()
+        
+class RateLimitServiceUnavailable(RuntimeError):
+    """Raised when Redis is unavailable for rate-limit operations."""
+
+class PermissionServiceUnavailable(RuntimeError):
+    """Raised when Redis is unavailable for permission operations."""

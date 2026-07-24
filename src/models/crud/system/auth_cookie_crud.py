@@ -5,9 +5,19 @@ from sqlalchemy import delete, select, update
 from src.models.database import SessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.tables.system.auth_cookie_table import AuthCookie
+from src.services.system.cache.permissionscache import remove_cached_permission_json
+from src.services.system.cache.ratelimitcache import remove_from_redis
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "AUTH COOKIE CRUD"
+
+
+async def _invalidate_cookie_cache(token_hash: str) -> None:
+    await remove_from_redis(f"cookie:{token_hash}")
+
+
+async def _invalidate_user_permission_cache(username: str) -> None:
+    await remove_cached_permission_json(f"user:{username}")
 
 
 async def add_auth_cookie(
@@ -30,6 +40,8 @@ async def add_auth_cookie(
     session.add(auth_cookie)
     await session.commit()
     await session.refresh(auth_cookie)
+    await _invalidate_cookie_cache(token_hash)
+    await _invalidate_user_permission_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Auth cookie row created with id {auth_cookie.id}.")
 
     if close_session:
@@ -75,6 +87,8 @@ async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = Non
 
     row.revoked = True
     await session.commit()
+    await _invalidate_cookie_cache(token_hash)
+    await _invalidate_user_permission_cache(row.username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Auth cookie revoked for hash.")
 
     if close_session:
@@ -107,8 +121,12 @@ async def refresh_auth_cookie(
     row.token_hash = new_token_hash
     row.expires_at = new_expires_at
     row.revoked = False
+    old_token_hash = token_hash
     await session.commit()
     await session.refresh(row)
+    await _invalidate_cookie_cache(old_token_hash)
+    await _invalidate_cookie_cache(new_token_hash)
+    await _invalidate_user_permission_cache(row.username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Refreshed auth cookie row id {row.id}.")
 
     if close_session:
@@ -156,10 +174,17 @@ async def delete_expired_auth_cookies(
         session = SessionLocal()
         close_session = True
 
+    stale_stmt = select(AuthCookie.token_hash, AuthCookie.username).where(AuthCookie.expires_at <= check_time)
+    stale_result = await session.execute(stale_stmt)
+    stale_rows = stale_result.all()
+
     stmt = delete(AuthCookie).where(AuthCookie.expires_at <= check_time)
     result = await session.execute(stmt)
     await session.commit()
     deleted = result.rowcount or 0
+    for token_hash, username in stale_rows:
+        await _invalidate_cookie_cache(token_hash)
+        await _invalidate_user_permission_cache(username)
     if deleted > 0:
         log_message(f"[INFO] [{PRINT_PREFIX}] Deleted {deleted} expired auth cookie rows.")
 
@@ -175,10 +200,17 @@ async def delete_auth_cookies_by_username(username: str, session: AsyncSession |
         session = SessionLocal()
         close_session = True
 
+    stale_stmt = select(AuthCookie.token_hash).where(AuthCookie.username == username)
+    stale_result = await session.execute(stale_stmt)
+    token_hashes = [row[0] for row in stale_result.all()]
+
     stmt = delete(AuthCookie).where(AuthCookie.username == username)
     result = await session.execute(stmt)
     await session.commit()
     deleted = result.rowcount or 0
+    for token_hash in token_hashes:
+        await _invalidate_cookie_cache(token_hash)
+    await _invalidate_user_permission_cache(username)
     if deleted > 0:
         log_message(f"[INFO] [{PRINT_PREFIX}] Deleted {deleted} auth cookie rows for user {username}.")
 

@@ -65,6 +65,9 @@ TRUSTED_PROXIES: list[str] = [proxy.strip() for proxy in os.getenv('TRUSTED_PROX
 REDIS_HOST: str = os.getenv('REDIS_HOST', 'localhost')
 REDIS_PORT: int = int(os.getenv('REDIS_PORT', '6379'))
 REDIS_PASSWORD: str = os.getenv('REDIS_PASSWORD', 'change-me-before-production')
+REDIS_RATELIMIT_EX_SECONDS: int = int(os.getenv('REDIS_RATELIMIT_EX_SECONDS', '3600'))
+REDIS_PERMISSIONS_EX_SECONDS: int = int(os.getenv('REDIS_PERMISSIONS_EX_SECONDS', '300'))
+REDIS_IP_BLOCK_EX_SECONDS: int = int(os.getenv('REDIS_IP_BLOCK_EX_SECONDS', '3600'))
 
 def _is_unsafe_secret(value: str, known_default: str) -> bool:
     if not value:

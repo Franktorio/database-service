@@ -1,86 +1,95 @@
 # ~/src/security/password_security.py
 # Decorator orchestrator for password validation and rate limiting.
 
-import asyncio
-import time
 from fastapi import HTTPException
 
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.crud.system.user_crud import get_user_by_username
 from src.security.tokens import create_cookie_token
-from src.security.ratelimit import RateLimit, RateLimitServiceUnavailable
-
 from src.security.tokens import verify_password
-
-# Dictionary to track per-user password login attempt rate limiters.
-_ratelimiters: dict[str, RateLimit] = {}
-_last_seen_by_user: dict[str, float] = {}
-_cache_lock = asyncio.Lock()
-
-
-def _place_in_ratelimiters(username: str, rate_limit: int) -> RateLimit:
-    current_time = time.time()
-    _ratelimiters[username] = RateLimit(
-        limit=rate_limit,
-        key_hash=username,
-        window_seconds=LOGIN_TIME_WINDOW,
-    )
-    _last_seen_by_user[username] = current_time
-    return _ratelimiters[username]
+from src.services.system.cache.permissionscache import (
+    cache_permission_json,
+    get_cached_permission_json,
+)
+from src.services.system.cache.ratelimitcache import (
+    ALLOWED,
+    DENIED,
+    INVALID_DATA,
+    NOT_FOUND,
+    TOO_SOON,
+    place_in_redis,
+    process_request,
+)
+from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
 
 
-async def cleanup_inactive_password_ratelimiters(max_inactive_seconds: int = LOGIN_TIME_WINDOW) -> int:
-    """Remove cached password ratelimiters that have been inactive for too long."""
-    now = time.time()
-    removed = 0
-    stale_limiters: list[RateLimit] = []
-    async with _cache_lock:
-        stale_users = [
-            username
-            for username, last_seen in _last_seen_by_user.items()
-            if (now - last_seen) >= max_inactive_seconds
-        ]
-        for username in stale_users:
-            _last_seen_by_user.pop(username, None)
-            limiter = _ratelimiters.pop(username, None)
-            if limiter is not None:
-                stale_limiters.append(limiter)
-                removed += 1
-
-    for limiter in stale_limiters:
-        try:
-            await limiter.delete()
-        except RateLimitServiceUnavailable:
-            # Cleanup should not fail request handling when Redis is down.
-            pass
-    return removed
+def _password_ratelimit_identifier(username: str) -> str:
+    return f"password:{username}"
 
 
-async def _obtain_ratelimit(username: str) -> RateLimit:
-    async with _cache_lock:
-        existing = _ratelimiters.get(username)
-        if existing is not None:
-            _last_seen_by_user[username] = time.time()
-            return existing
+def _user_permission_identifier(username: str) -> str:
+    return f"user:{username}"
+
+
+async def _get_user_permission_payload(username: str) -> dict:
+    cached = await get_cached_permission_json(_user_permission_identifier(username))
+    if cached is not None:
+        return cached
 
     user = await get_user_by_username(username)
-    configured_limit = user.login_rate_limit if user is not None else LOGIN_ATTEMPTS_LIMIT
+    if user is None:
+        return {
+            "username": username,
+            "roles": [],
+            "role": "",
+            "login_rate_limit": LOGIN_ATTEMPTS_LIMIT,
+        }
 
-    async with _cache_lock:
-        existing = _ratelimiters.get(username)
-        if existing is not None:
-            _last_seen_by_user[username] = time.time()
-            return existing
-        return _place_in_ratelimiters(username, configured_limit)
+    payload = {
+        "username": user.username,
+        "roles": user.roles,
+        "role": user.role,
+        "login_rate_limit": user.login_rate_limit,
+    }
+    await cache_permission_json(_user_permission_identifier(username), payload)
+    return payload
+
+
+async def _enforce_password_ratelimit(username: str, configured_limit: int) -> tuple[bool, float]:
+    identifier = _password_ratelimit_identifier(username)
+    result = await process_request(identifier)
+    if result in (NOT_FOUND, INVALID_DATA):
+        await place_in_redis(
+            identifier,
+            limit=configured_limit,
+            window=LOGIN_TIME_WINDOW,
+        )
+        result = await process_request(identifier)
+
+    if result == ALLOWED:
+        return True, 0.0
+    if result in (DENIED, TOO_SOON):
+        return False, 0.0
+    raise RuntimeError(f"Unexpected password ratelimit result: {result}")
     
 
 
 async def authenticate_password(username: str, password: str, ip_address: str) -> bool:
     """Return True on success, otherwise raise HTTPException with persistent auth logging."""
-    rate_limiter = await _obtain_ratelimit(username)
+
     try:
-        allowed, status = await rate_limiter.is_allowed()
+        permission_payload = await _get_user_permission_payload(username)
+        configured_limit = int(permission_payload.get("login_rate_limit", LOGIN_ATTEMPTS_LIMIT))
+        allowed, status = await _enforce_password_ratelimit(username, configured_limit)
+    except PermissionServiceUnavailable:
+        await safe_add_persistent_log(
+            log_type="SERVICE",
+            log_level="ERROR",
+            message="Password permission cache unavailable: Redis is not reachable.",
+            ip_address=ip_address,
+        )
+        raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
     except RateLimitServiceUnavailable:
         await safe_add_persistent_log(
             log_type="SERVICE",
@@ -89,6 +98,7 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
             ip_address=ip_address,
         )
         raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
+
     if not allowed:
         await safe_add_persistent_log(
             log_type="USER RATE LIMIT",
@@ -100,7 +110,7 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
             status_code=429,
             detail={"error": "Password rate limit exceeded.", "retry_after": status},
         )
-    
+
     user = await get_user_by_username(username)
     if user is None:
         await safe_add_persistent_log(
@@ -110,7 +120,7 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
             ip_address=ip_address,
         )
         raise HTTPException(status_code=401, detail="Invalid username or password.")
-    
+
     result = verify_password(password, user.password_hash, salt=user.password_salt, iterations=user.hash_iterations)
     if not result:
         await safe_add_persistent_log(
@@ -127,7 +137,7 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
         message=f"Password authentication accepted for username={username}",
         ip_address=ip_address,
     )
-    
+
     return user
 
 async def auth_and_grant_token(username: str, password: str, ip_address: str, expiration: int | None = None) -> tuple[str, int | None]:

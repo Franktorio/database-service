@@ -5,9 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.database import SessionLocal
 from src.models.crud.system.auth_cookie_crud import delete_auth_cookies_by_username
 from src.models.tables.system.user_table import User
+from src.services.system.cache.permissionscache import remove_cached_permission_json
+from src.services.system.cache.ratelimitcache import remove_from_redis
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "USER CRUD"
+
+
+async def _invalidate_user_cache(username: str) -> None:
+    await remove_cached_permission_json(f"user:{username}")
+    await remove_from_redis(f"password:{username}")
 
 async def add_user(
     username: str,
@@ -44,6 +51,7 @@ async def add_user(
     session.add(user)
     await session.commit()
     await session.refresh(user)
+    await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] User row created with id {user.id}.")
 
     if close_session:
@@ -156,6 +164,7 @@ async def update_user(
 
     await session.commit()
     await session.refresh(user)
+    await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated user {username}.")
 
     if close_session:
@@ -176,6 +185,8 @@ async def delete_user(username: str, session: AsyncSession | None = None) -> boo
     result = await session.execute(stmt)
     await session.commit()
     deleted = result.rowcount > 0
+    if deleted:
+        await _invalidate_user_cache(username)
     if deleted:
         log_message(f"[INFO] [{PRINT_PREFIX}] Deleted user {username}.")
     else:
@@ -219,6 +230,7 @@ async def update_user_password(
 
     await session.commit()
     await session.refresh(user)
+    await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated password metadata for user {username}.")
 
     if close_session:
@@ -251,6 +263,7 @@ async def update_user_login_rate_limit(
     user.login_rate_limit = new_login_rate_limit
     await session.commit()
     await session.refresh(user)
+    await _invalidate_user_cache(username)
     log_message(f"[INFO] [{PRINT_PREFIX}] Updated login rate limit for user {username}.")
 
     if close_session:

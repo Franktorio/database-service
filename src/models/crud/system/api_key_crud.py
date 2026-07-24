@@ -4,9 +4,16 @@ from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.database import SessionLocal
 from src.models.tables.system.api_key_table import ApiKey
+from src.services.system.cache.permissionscache import remove_cached_permission_json
+from src.services.system.cache.ratelimitcache import remove_from_redis
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "API KEY CRUD"
+
+
+async def _invalidate_api_key_cache(key_hash: str) -> None:
+    await remove_from_redis(f"api_key:{key_hash}")
+    await remove_cached_permission_json(f"api_key:{key_hash}")
 
 async def add_api_key(
     key_hash: str,
@@ -26,6 +33,7 @@ async def add_api_key(
     session.add(api_key)
     await session.commit()
     await session.refresh(api_key)
+    await _invalidate_api_key_cache(key_hash)
     log_message(f"[INFO] [{PRINT_PREFIX}] API key row created with id {api_key.id}.")
 
     if close_session:
@@ -81,6 +89,8 @@ async def delete_api_key(key_hash: str, session: AsyncSession | None = None) -> 
     await session.commit()
     deleted = result.rowcount > 0
     if deleted:
+        await _invalidate_api_key_cache(key_hash)
+    if deleted:
         log_message(f"[INFO] [{PRINT_PREFIX}] Deleted API key for provided hash.")
     else:
         log_message(f"[WARNING] [{PRINT_PREFIX}] No API key found to delete for provided hash.")
@@ -120,6 +130,7 @@ async def update_api_key(
     if updated_api_key is None:
         log_message(f"[WARNING] [{PRINT_PREFIX}] API key update skipped; key not found.")
     else:
+        await _invalidate_api_key_cache(key_hash)
         log_message(f"[INFO] [{PRINT_PREFIX}] Updated API key id {updated_api_key.id}.")
 
     if close_session:

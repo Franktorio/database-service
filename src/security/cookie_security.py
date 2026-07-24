@@ -1,6 +1,4 @@
-import asyncio
 from functools import wraps
-import time
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -8,79 +6,73 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import RedirectResponse
 from starlette.responses import Response
 
-from config.loader import COOKIE_DEFAULT_RATE_LIMIT
+from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.models.crud.system.user_crud import get_user_by_username
 from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
-from src.security.ratelimit import RateLimit, RateLimitServiceUnavailable
+from src.security.extract import extract_client_ip, extract_cookie_value
 from src.security.tokens import decode_jwt_token, hash_token
 from src.services.system.logging import log_message
-
-_ratelimiters: dict[str, RateLimit] = {}
-_last_seen_by_token: dict[str, float] = {}
-_cache_lock = asyncio.Lock()
-
-
-def _client_ip(request) -> str | None:
-    client = getattr(request, "client", None)
-    if client is not None:
-        host = getattr(client, "host", None)
-        if host:
-            return host
-    return None
-
-
-def _place_in_ratelimiters(token_hash: str, rate_limit: int) -> RateLimit:
-    current_time = time.time()
-    _ratelimiters[token_hash] = RateLimit(
-        limit=rate_limit,
-        key_hash=token_hash,
-    )
-    _last_seen_by_token[token_hash] = current_time
-    return _ratelimiters[token_hash]
+from src.services.system.cache.permissionscache import (
+    cache_permission_json,
+    get_cached_permission_json,
+)
+from src.services.system.cache.ratelimitcache import (
+    ALLOWED,
+    DENIED,
+    INVALID_DATA,
+    NOT_FOUND,
+    TOO_SOON,
+    place_in_redis,
+    process_request,
+)
+from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
 
 
-async def cleanup_inactive_cookie_ratelimiters(max_inactive_seconds: int) -> int:
-    """Remove cached cookie ratelimiters that have been inactive for too long."""
-    now = time.time()
-    removed = 0
-    stale_limiters: list[RateLimit] = []
-    async with _cache_lock:
-        stale_hashes = [
-            token_hash
-            for token_hash, last_seen in _last_seen_by_token.items()
-            if (now - last_seen) >= max_inactive_seconds
-        ]
-        for token_hash in stale_hashes:
-            _last_seen_by_token.pop(token_hash, None)
-            limiter = _ratelimiters.pop(token_hash, None)
-            if limiter is not None:
-                stale_limiters.append(limiter)
-                removed += 1
-
-    for limiter in stale_limiters:
-        try:
-            await limiter.delete()
-        except RateLimitServiceUnavailable:
-            # Cleanup should not fail request handling when Redis is down.
-            pass
-    return removed
+def _cookie_ratelimit_identifier(token_hash: str) -> str:
+    return f"cookie:{token_hash}"
 
 
-async def _obtain_ratelimit(token_hash: str) -> RateLimit:
-    async with _cache_lock:
-        existing = _ratelimiters.get(token_hash)
-        if existing is not None:
-            _last_seen_by_token[token_hash] = time.time()
-            return existing
+def _user_permission_identifier(username: str) -> str:
+    return f"user:{username}"
 
-        limiter = _place_in_ratelimiters(
-            token_hash,
-            COOKIE_DEFAULT_RATE_LIMIT,
+
+async def _resolve_user_permissions(username: str) -> dict | None:
+    cached = await get_cached_permission_json(_user_permission_identifier(username))
+    if cached is not None:
+        return cached
+
+    user = await get_user_by_username(username)
+    if user is None:
+        return None
+
+    payload = {
+        "username": user.username,
+        "roles": user.roles,
+        "role": user.role,
+        "login_rate_limit": user.login_rate_limit,
+    }
+    await cache_permission_json(_user_permission_identifier(username), payload)
+    return payload
+
+
+async def _ensure_cookie_ratelimit(token_hash: str) -> tuple[bool, float]:
+    identifier = _cookie_ratelimit_identifier(token_hash)
+    result = await process_request(identifier)
+    if result in (NOT_FOUND, INVALID_DATA):
+        await place_in_redis(
+            identifier,
+            limit=COOKIE_DEFAULT_RATE_LIMIT,
+            window=RATE_LIMIT_WINDOW_SECONDS,
         )
-        _last_seen_by_token[token_hash] = time.time()
-        return limiter
+        result = await process_request(identifier)
+
+    if result == ALLOWED:
+        return True, 0.0
+    if result in (DENIED, TOO_SOON):
+        return False, 0.0
+    raise RuntimeError(f"Unexpected cookie ratelimit result: {result}")
 
 def cookie_authentication(required_roles: set[str] | None = None, redirect_url: str | None = None):
     """Decorator that validates a cookie JWT, enforces optional role checks, and per-token rate limits."""
@@ -89,8 +81,8 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
     def decorator(func):
         @wraps(func)
         async def wrapper(request, *args, **kwargs):
-            client_ip = _client_ip(request)
-            cookie_token = request.cookies.get(COOKIE_JWT_INDEX)
+            client_ip = extract_client_ip(request)
+            cookie_token = extract_cookie_value(request, COOKIE_JWT_INDEX)
             if not cookie_token:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",
@@ -114,7 +106,45 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token.")
 
+            username_claim = token_payload.get("username")
+            if not isinstance(username_claim, str) or not username_claim.strip():
+                await safe_add_persistent_log(
+                    log_type="USER AUTH",
+                    log_level="WARNING",
+                    message="Cookie authentication failed: missing username claim",
+                    ip_address=client_ip,
+                )
+                if redirect_url:
+                    return RedirectResponse(url=redirect_url)
+                raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
+
             token_hash = hash_token(cookie_token)
+            try:
+                allowed, status = await _ensure_cookie_ratelimit(token_hash)
+            except RateLimitServiceUnavailable:
+                await safe_add_persistent_log(
+                    log_type="SERVICE",
+                    log_level="ERROR",
+                    message="Cookie rate limiter unavailable: Redis is not reachable.",
+                    ip_address=client_ip,
+                )
+                raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
+
+            if not allowed:
+                await safe_add_persistent_log(
+                    log_type="USER RATE LIMIT",
+                    log_level="WARNING",
+                    message=(
+                        "Cookie rate limit exceeded "
+                        f"username={username_claim} retry_after={status:.2f}s"
+                    ),
+                    ip_address=client_ip,
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail={"error": "Rate limit exceeded.", "retry_after": status},
+                )
+
             cookie_row = await get_auth_cookie_by_hash(token_hash)
             if cookie_row is None:
                 await safe_add_persistent_log(
@@ -147,20 +177,30 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token has expired.")
 
-            username = cookie_row.username # Use the username from the database row instead of the JWT payload to prevent tampering
-            if not username:
+            username = cookie_row.username
+            if username != username_claim:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",
                     log_level="WARNING",
-                    message="Cookie authentication failed: missing username claim",
+                    message="Cookie authentication failed: username claim mismatch.",
                     ip_address=client_ip,
                 )
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
 
-            user = await get_user_by_username(username)
-            if user is None:
+            try:
+                permissions = await _resolve_user_permissions(username)
+            except PermissionServiceUnavailable:
+                await safe_add_persistent_log(
+                    log_type="SERVICE",
+                    log_level="ERROR",
+                    message="User permissions cache unavailable.",
+                    ip_address=client_ip,
+                )
+                raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
+
+            if permissions is None:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",
                     log_level="WARNING",
@@ -171,7 +211,8 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="User no longer exists.")
 
-            effective_role = (user.role or "").lower()
+            roles = permissions.get("roles") or []
+            effective_role = str(permissions.get("role") or (roles[0] if roles else "")).lower()
             if normalized_roles and effective_role not in normalized_roles:
                 await safe_add_persistent_log(
                     log_type="USER AUTH",
@@ -187,47 +228,13 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=403, detail="Insufficient role.")
 
-            ratelimit = await _obtain_ratelimit(token_hash)
-
-            try:
-                allowed, status = await ratelimit.is_allowed()
-            except RateLimitServiceUnavailable:
-                await safe_add_persistent_log(
-                    log_type="SERVICE",
-                    log_level="ERROR",
-                    message="Cookie rate limiter unavailable: Redis is not reachable.",
-                    ip_address=client_ip,
-                )
-                raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
-            if not allowed:
-                await safe_add_persistent_log(
-                    log_type="USER RATE LIMIT",
-                    log_level="WARNING",
-                    message=(
-                        "Cookie rate limit exceeded "
-                        f"username={username} retry_after={status:.2f}s"
-                    ),
-                    ip_address=client_ip,
-                )
-                raise HTTPException(
-                    status_code=429,
-                    detail={"error": "Rate limit exceeded.", "retry_after": status},
-                )
-
-            seconds_since_last_request = 0.0
-            try:
-                seconds_since_last_request = await ratelimit.how_long_ago()
-            except RateLimitServiceUnavailable:
-                # Keep the request successful even if optional limiter telemetry is unavailable.
-                seconds_since_last_request = 0.0
-
             request._cookie_data = {
                 "username": username,
                 "role": effective_role,
                 "token_hash": token_hash[:12],
-                "rate_limit": ratelimit.limit,
-                "requests_remaining": int(status) if allowed else 0,
-                "seconds_since_last_request": seconds_since_last_request,
+                "rate_limit": COOKIE_DEFAULT_RATE_LIMIT,
+                "requests_remaining": 0,
+                "seconds_since_last_request": 0.0,
             }
 
             log_message(

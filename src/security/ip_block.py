@@ -5,111 +5,35 @@
 # They do not persist across server restarts, but are stored in memory for the duration of the server's uptime.
 
 import time
-import asyncio
 from functools import wraps
-from fastapi import Request, HTTPException
-import ipaddress
+from fastapi import HTTPException
 
-from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
-from src.security.ratelimit import RateLimit, RateLimitServiceUnavailable
 from config.loader import (
+    IP_BLOCKING_DURATION,
     IP_BLOCKING_ENABLED,
     IP_BLOCKING_THRESHOLD,
     IP_BLOCKING_TIME_WINDOW,
-    IP_BLOCKING_DURATION,
+    REDIS_IP_BLOCK_EX_SECONDS,
     TRUSTED_PROXIES,
 )
+from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
+from src.security.extract import extract_client_ip, extract_request_from_call
+from src.services.system.cache.ratelimitcache import (
+    ALLOWED,
+    DENIED,
+    INVALID_DATA,
+    NOT_FOUND,
+    TOO_SOON,
+    place_in_redis,
+    process_request,
+)
+from src.services.system.cache.redis.client import RateLimitServiceUnavailable
 from src.services.system.cache.redis.client import RedisClient
 from src.services.system.logging import log_message
 
-_ip_requests: dict[str, RateLimit] = {}  # Maps IP addresses to a RateLimit object that tracks the number of requests and the time window.
-_last_seen_by_ip: dict[str, float] = {}
-_ip_lock = asyncio.Lock()  # A lock to synchronize access to the _ip_requests dictionary.
 
-
-def _validate_ip_address(ip_address: str) -> bool:
-    """Validate the format of an IP address (IPv4 or IPv6)."""
-
-    try:
-        ipaddress.ip_address(ip_address)
-        return True
-    except ValueError:
-        return False
-
-
-def _get_client_ip(request: Request) -> str | None:
-    peer_ip = request.client.host if request.client else None
-
-    if peer_ip in TRUSTED_PROXIES:
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip.strip()
-        
-    if not _validate_ip_address(peer_ip):
-        return None
-
-    return peer_ip
-
-
-def _extract_request_from_call(args: tuple, kwargs: dict) -> Request | None:
-    for arg in args:
-        if isinstance(arg, Request):
-            return arg
-    for value in kwargs.values():
-        if isinstance(value, Request):
-            return value
-    return None
-
-
-async def _get_or_create_ip_ratelimit(ip_address: str) -> RateLimit:
-    now = time.time()
-    async with _ip_lock:
-        existing = _ip_requests.get(ip_address)
-        if existing is not None:
-            _last_seen_by_ip[ip_address] = now
-            return existing
-
-        limiter = RateLimit(
-            limit=IP_BLOCKING_THRESHOLD,
-            key_hash=ip_address,
-            window_seconds=IP_BLOCKING_TIME_WINDOW,
-        )
-        _ip_requests[ip_address] = limiter
-        _last_seen_by_ip[ip_address] = now
-        return limiter
-
-
-async def cleanup_inactive_ip_blocks(max_inactive_seconds: int) -> int:
-    """Remove stale IP ratelimiters and expired blocks from memory cache."""
-    now = time.time()
-    removed = 0
-    stale_limiters: list[RateLimit] = []
-
-    async with _ip_lock:
-        stale_ips = [
-            ip
-            for ip, last_seen in _last_seen_by_ip.items()
-            if (now - last_seen) >= max_inactive_seconds
-        ]
-        for ip in stale_ips:
-            _last_seen_by_ip.pop(ip, None)
-            limiter = _ip_requests.pop(ip, None)
-            if limiter is not None:
-                stale_limiters.append(limiter)
-                removed += 1
-
-    for limiter in stale_limiters:
-        try:
-            await limiter.delete()
-        except RateLimitServiceUnavailable:
-            # Cleanup should not fail request handling when Redis is down.
-            pass
-    return removed
-
+def _ip_ratelimit_identifier(ip_address: str) -> str:
+    return f"ip_block:{ip_address}"
 
 def with_ip_block(func):
     """Decorator that temporarily blocks abusive IPs using ratelimit-style tracking."""
@@ -118,8 +42,8 @@ def with_ip_block(func):
         if not IP_BLOCKING_ENABLED:
             return await func(*args, **kwargs)
 
-        request = _extract_request_from_call(args, kwargs)
-        ip_address = _get_client_ip(request) if request is not None else None
+        request = extract_request_from_call(args, kwargs)
+        ip_address = extract_client_ip(request, TRUSTED_PROXIES)
         if not ip_address:
             return await func(*args, **kwargs)
 
@@ -137,14 +61,17 @@ def with_ip_block(func):
                 log_message(f"[WARNING] [IP BLOCK] Invalid blocked_until value for IP {ip_address}: {blocked_until}")
                 blocked_retry_after = float(IP_BLOCKING_DURATION)
                 pass
-            limiter = None
-        else:
-            limiter = await _get_or_create_ip_ratelimit(ip_address)
             
-
-        if blocked_retry_after is None and limiter is not None:
+        if blocked_retry_after is None:
             try:
-                allowed, _ = await limiter.is_allowed()
+                result = await process_request(_ip_ratelimit_identifier(ip_address))
+                if result in (NOT_FOUND, INVALID_DATA):
+                    await place_in_redis(
+                        _ip_ratelimit_identifier(ip_address),
+                        limit=IP_BLOCKING_THRESHOLD,
+                        window=IP_BLOCKING_TIME_WINDOW,
+                    )
+                    result = await process_request(_ip_ratelimit_identifier(ip_address))
             except RateLimitServiceUnavailable:
                 await safe_add_persistent_log(
                     log_type="SERVICE",
@@ -154,10 +81,16 @@ def with_ip_block(func):
                 )
                 raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
 
-            if not allowed:
+            if result in (DENIED, TOO_SOON):
                 newly_blocked = True
                 blocked_retry_after = float(IP_BLOCKING_DURATION)
-                await RedisClient.set(f"ip_block:{ip_address}", f"{time.time() + IP_BLOCKING_DURATION}", expire=IP_BLOCKING_DURATION)
+                await RedisClient.set(
+                    f"ip_block:{ip_address}",
+                    f"{time.time() + IP_BLOCKING_DURATION}",
+                    ex=REDIS_IP_BLOCK_EX_SECONDS,
+                )
+            elif result != ALLOWED:
+                raise RuntimeError(f"Unexpected IP block ratelimit result: {result}")
 
         if blocked_retry_after is not None:
             if newly_blocked:
