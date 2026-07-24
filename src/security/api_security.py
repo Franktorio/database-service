@@ -9,10 +9,10 @@ from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.models.tables.system.api_key_table import ApiKey
 from src.security.extract import extract_bearer_token, extract_client_ip, extract_request_from_call
 from src.security.tokens import hash_token
+
 from src.services.system.cache.permissionscache import (
     cache_permission_json,
     get_cached_permission_json,
-    remove_cached_permission_json,
 )
 from src.services.system.cache.ratelimitcache import (
     ALLOWED,
@@ -22,7 +22,6 @@ from src.services.system.cache.ratelimitcache import (
     TOO_SOON,
     place_in_redis,
     process_request,
-    remove_from_redis,
 )
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
 
@@ -51,12 +50,6 @@ async def refresh_ratelimiter(api_key: ApiKey) -> None:
         window=RATE_LIMIT_WINDOW_SECONDS,
     )
     await cache_permission_json(_permission_identifier(api_key.key_hash), _to_permission_payload(api_key))
-
-
-async def remove_ratelimiter(key_hash: str) -> None:
-    """Invalidate Redis cache entries for an API key hash."""
-    await remove_from_redis(_ratelimit_identifier(key_hash))
-    await remove_cached_permission_json(_permission_identifier(key_hash))
 
 
 async def _get_api_permission_payload(key_hash: str) -> dict | None:

@@ -14,6 +14,7 @@ from src.models.crud.system.persistent_logs_crud import safe_add_persistent_log
 from src.security.extract import extract_client_ip, extract_cookie_value
 from src.security.tokens import decode_jwt_token, hash_token
 from src.services.system.logging import log_message
+
 from src.services.system.cache.permissionscache import (
     cache_permission_json,
     get_cached_permission_json,
@@ -33,10 +34,8 @@ from src.services.system.cache.redis.client import PermissionServiceUnavailable,
 def _cookie_ratelimit_identifier(token_hash: str) -> str:
     return f"cookie:{token_hash}"
 
-
 def _user_permission_identifier(username: str) -> str:
     return f"user:{username}"
-
 
 async def _resolve_user_permissions(username: str) -> dict | None:
     cached = await get_cached_permission_json(_user_permission_identifier(username))
@@ -73,6 +72,7 @@ async def _ensure_cookie_ratelimit(token_hash: str) -> tuple[bool, float]:
     if result in (DENIED, TOO_SOON):
         return False, 0.0
     raise RuntimeError(f"Unexpected cookie ratelimit result: {result}")
+
 
 def cookie_authentication(required_roles: set[str] | None = None, redirect_url: str | None = None):
     """Decorator that validates a cookie JWT, enforces optional role checks, and per-token rate limits."""

@@ -39,7 +39,7 @@ async def patch_user(request: Request, model: UserUpdateRequest):
 
     if updated is None:
         raise HTTPException(status_code=404, detail=f"User '{model.username}' not found.")
-
+    
     return {
         "message": "User updated successfully.",
         "user": {

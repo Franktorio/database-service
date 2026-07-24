@@ -5,7 +5,7 @@ from fastapi import HTTPException, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.system.api_db_endpoints.models import ApiKeyDeleteRequest
-from src.security.api_security import api_authentication, remove_ratelimiter
+from src.security.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_token
 from src.models.crud.system.api_key_crud import delete_api_key
@@ -24,7 +24,5 @@ async def delete_key(request: Request, model: ApiKeyDeleteRequest):
     deleted = await delete_api_key(key_hash)
     if not deleted:
         raise HTTPException(status_code=404, detail="API key not found.")
-    
-    await remove_ratelimiter(key_hash)
 
     return {"message": "API key deleted successfully."}
