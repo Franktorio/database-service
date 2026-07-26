@@ -1,4 +1,4 @@
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.system.user_db_endpoints.routes.router import router
@@ -45,7 +45,7 @@ async def get_user(username: str, request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Received get-user request for username {username}.")
     user = await get_user_by_username(username)
     if user is None:
-        return {"message": f"User '{username}' not found."}
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
 
     return {
         "user": {

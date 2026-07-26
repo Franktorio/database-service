@@ -40,6 +40,10 @@ POSTGRESQL_POOL_PRE_PING: bool = os.getenv('POSTGRESQL_POOL_PRE_PING', 'true').l
 # API server configuration
 API_ENABLED: bool = os.getenv('API_ENABLED', 'True').lower() in ('true', '1', 't')
 API_PORT: int = int(os.getenv('API_PORT', '8000'))
+API_EXPOSE_TEST_ENDPOINTS: bool = os.getenv(
+    'API_EXPOSE_TEST_ENDPOINTS',
+    'true' if OPERATING_MODE == 'development' else 'false',
+).lower() in ('true', '1', 't')
 API_KEY_PEPPER: str = os.getenv('API_KEY_PEPPER', 'dev-only-change-me')
 PASSWORD_PEPPER: str = os.getenv('PASSWORD_PEPPER', 'dev-only-change-me-password')
 JWT_SECRET: str = os.getenv('JWT_SECRET', 'dev-only-change-me-jwt')
@@ -141,4 +145,7 @@ def _enforce_secret_safety() -> None:
 _enforce_secret_safety()
 
 logger.info(f"[INFO] [{PRINT_PREFIX}] Loaded environment variables from {_env_path}.")
-logger.debug(f"[DEBUG] [{PRINT_PREFIX}] Operating mode: {OPERATING_MODE}, API enabled: {API_ENABLED}, API port: {API_PORT}")
+logger.debug(
+    f"[DEBUG] [{PRINT_PREFIX}] Operating mode: {OPERATING_MODE}, API enabled: {API_ENABLED}, "
+    f"API test endpoints enabled: {API_EXPOSE_TEST_ENDPOINTS}, API port: {API_PORT}"
+)

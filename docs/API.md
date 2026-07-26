@@ -1,6 +1,6 @@
 # API Reference
 
-This service exposes a small administrative API plus two authentication test flows.
+This service exposes a small administrative API plus optional authentication test flows.
 
 ## Global Behavior
 
@@ -17,6 +17,8 @@ Authorization: Bearer your-api-key
 ```
 
 ## Public/Test Endpoints
+
+Auth/test helper endpoints below are only mounted when `API_EXPOSE_TEST_ENDPOINTS=true`.
 
 ### `GET /`
 

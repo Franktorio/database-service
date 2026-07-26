@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Any
 
-from config.loader import API_ENABLED, API_PORT, TRUSTED_PROXIES
+from config.loader import API_ENABLED, API_EXPOSE_TEST_ENDPOINTS, API_PORT, TRUSTED_PROXIES
 from src.api.system.api_db_endpoints import routes as api_db_routes
 from src.api.system.user_db_endpoints import routes as user_db_routes
 from src.services.system.cache.redis.client import RedisClient
@@ -78,6 +78,7 @@ app = fastapi.FastAPI(
 )
 app.include_router(api_db_routes.router)
 app.include_router(user_db_routes.router)
+test_router = fastapi.APIRouter()
 
 def start_api_server(db_ready_signal=None):
     """Start the API server using Uvicorn."""
@@ -101,7 +102,7 @@ async def root(request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Root endpoint called.")
     return {"message": "Hello from the backend!"}
 
-@app.post("/api-auth-test")
+@test_router.post("/api-auth-test")
 @with_ip_block
 @api_authentication(permission_level=VIEW_LEVEL)
 async def auth_test(request: Request):
@@ -110,7 +111,7 @@ async def auth_test(request: Request):
         "message": f"API key is valid: {request.state.api_data}"
     }
 
-@app.post("/login-auth-test")
+@test_router.post("/login-auth-test")
 @with_ip_block
 async def login_test(login_request: LoginRequestBase, request: Request,):
     log_message(
@@ -129,10 +130,17 @@ async def login_test(login_request: LoginRequestBase, request: Request,):
     
     return response
 
-@app.post("/cookie-auth-test")
+@test_router.post("/cookie-auth-test")
 @with_ip_block
 @cookie_authentication()
 async def cookie_test(request: Request):
     log_message(f"[DEBUG] [{PRINT_PREFIX}] Cookie auth test endpoint called.")
     response = JSONResponse(content={"message": "Cookie authentication successful."})
     return response
+
+
+if API_EXPOSE_TEST_ENDPOINTS:
+    app.include_router(test_router)
+    log_message(f"[INFO] [{PRINT_PREFIX}] Test/auth utility endpoints are enabled.")
+else:
+    log_message(f"[INFO] [{PRINT_PREFIX}] Test/auth utility endpoints are disabled.")

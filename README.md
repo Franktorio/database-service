@@ -67,6 +67,7 @@ Create `config/.env` and set at minimum:
 - `POSTGRESQL_PORT`
 - `API_ENABLED`
 - `API_PORT`
+- `API_EXPOSE_TEST_ENDPOINTS`
 - `API_KEY_PEPPER`
 - `PASSWORD_PEPPER`
 - `JWT_SECRET`
@@ -175,10 +176,13 @@ python3 tools/tests/live_system_api_test.py
 Public/test endpoints:
 
 - `GET /`
+- `GET /api/db/keys/`
+
+Conditional test/auth utility endpoints (`API_EXPOSE_TEST_ENDPOINTS=true`):
+
 - `POST /api-auth-test`
 - `POST /login-auth-test`
 - `POST /cookie-auth-test`
-- `GET /api/db/keys/`
 
 SUPER_ADMIN API-key-protected endpoints:
 
