@@ -16,7 +16,10 @@ PROJECT_ROOT = CONFIG_DIR.parent
 _env_path = CONFIG_DIR / _env_file
 dotenv.load_dotenv(str(_env_path))
 
-OPERATING_MODE: str = os.getenv('OPERATING_MODE', 'development')
+OPERATING_MODE_DEVELOPMENT = 'development'
+OPERATING_MODE_PRODUCTION = 'production'
+
+OPERATING_MODE: str = os.getenv('OPERATING_MODE', OPERATING_MODE_DEVELOPMENT)
 
 # PostgreSQL database configuration
 POSTGRESQL_DATABASE_NAME: str = os.getenv('POSTGRESQL_DATABASE_NAME', 'mydatabase')
@@ -72,6 +75,11 @@ REDIS_PASSWORD: str = os.getenv('REDIS_PASSWORD', 'change-me-before-production')
 REDIS_RATELIMIT_EX_SECONDS: int = int(os.getenv('REDIS_RATELIMIT_EX_SECONDS', '3600'))
 REDIS_PERMISSIONS_EX_SECONDS: int = int(os.getenv('REDIS_PERMISSIONS_EX_SECONDS', '300'))
 REDIS_IP_BLOCK_EX_SECONDS: int = int(os.getenv('REDIS_IP_BLOCK_EX_SECONDS', '3600'))
+
+# Async Task Supervisor Configuration
+DEFAULT_TASK_RESTART_ATTEMPTS: int = int(os.getenv('DEFAULT_TASK_RESTART_ATTEMPTS', '5'))
+DEFAULT_TASK_RESTART_DELAY: int = int(os.getenv('DEFAULT_TASK_RESTART_DELAY', '1')) # Multiplied by 2 for each restart
+
 
 def _is_unsafe_secret(value: str, known_default: str) -> bool:
     if not value:

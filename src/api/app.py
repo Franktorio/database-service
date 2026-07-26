@@ -69,19 +69,23 @@ async def lifespan(app: fastapi.FastAPI):
     if is_healthcheck_service_enabled():
         log_message(f"[INFO] [{PRINT_PREFIX}] Starting healthcheck service...")
         background_tasks.append(TaskSupervisor(healthcheck_service_loop, name="HealthcheckService"))
+
+    for task in background_tasks:
+        task.supervise_task()
+    if background_tasks:
+        log_message(f"[INFO] [{PRINT_PREFIX}] Started {len(background_tasks)} supervised background task(s).")
     
     if _DB_READY_SIGNAL is not None:
         _DB_READY_SIGNAL.set_ready()
-        for task in background_tasks:
-            task.supervise_task()
         log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal set to ready.")
     log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan startup complete.")
 
     yield # Application waits here while running, then resumes after shutdown.
 
     log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan shutdown complete... performing cleanup.")
-    for task in background_tasks:
-        task.cancel()
+    if background_tasks:
+        await asyncio.gather(*(task.cancel() for task in background_tasks), return_exceptions=True)
+        log_message(f"[INFO] [{PRINT_PREFIX}] Supervised background tasks stopped.")
     await RedisClient.close()
     await close_db()
 
