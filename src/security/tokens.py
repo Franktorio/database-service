@@ -18,6 +18,7 @@ from config.loader import (
     PASSWORD_HASH_ITERATIONS,
     PASSWORD_PEPPER,
     OPERATING_MODE,
+    OPERATING_MODE_PRODUCTION,
 )
 from src.api.config import COOKIE_JWT_INDEX
 from src.models.crud.system.api_key_crud import add_api_key, get_api_key
@@ -183,7 +184,7 @@ def get_cookie_settings(expires_minutes: int = JWT_EXP_MINUTES) -> dict:
     return {
         "key": COOKIE_JWT_INDEX,
         "httponly": True,
-        "secure": OPERATING_MODE == "production",  # Set to True in production with HTTPS
+        "secure": OPERATING_MODE == OPERATING_MODE_PRODUCTION,  # Set to True in production with HTTPS
         "samesite": "lax",
         "path": "/",
         "max_age": max_age,

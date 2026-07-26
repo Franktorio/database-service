@@ -15,6 +15,7 @@ from config.loader import (
     POSTGRESQL_PORT,
 )
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from src.models.database import SessionLocal
 from src.services.system.logging import log_message
 
@@ -25,7 +26,7 @@ LOCALCONFIG = json.loads(
 )["dbhealthchecker"]
 
 HEALTHCHECK_ENABLED = LOCALCONFIG.get("enabled", True)
-AUTO_ROLLOVER = LOCALCONFIG.get("auto_rollover", True)
+AUTO_ROLLOVER = LOCALCONFIG.get("auto_rollover", False)
 SHUTDOWN_ON_FAILURE = LOCALCONFIG.get("shutdown_on_failure", True)
 LENIENCY = LOCALCONFIG.get("leniency", 5)
 INTERVAL = LOCALCONFIG.get("interval", 60)
@@ -36,6 +37,20 @@ MAX_RESTORE_ATTEMPTS = LOCALCONFIG.get("max_restore_attempts", 3)
 BACKUP_DIR = Path(LOCALCONFIG.get("backup_dir", "backups"))
 if not BACKUP_DIR.is_absolute():
     BACKUP_DIR = PROJECT_ROOT / BACKUP_DIR
+
+"""
+This module is made with the intention of being a kill-on-failure as the application will not have 24/7 monitoring.
+
+If auto rollover is enabled, the service will attempt to restore from the latest backup.
+A safety backup of the current database is always created before restore operations begin.
+There is a leniency count to allow for temporary database issues without triggering a restore or shutdown.
+If the database is restored from a backup, the service will wait for a reparations interval before resuming health checks to allow the database to stabilize.
+
+If up to max_restore_attempts are reached and the database is still failing health checks, the service will shut down to prevent further damage.
+
+Backups are never deleted, just quarantined in a 'bad_backups' directory for further inspection. The service will attempt to restore from the next latest backup if available.
+If restoration fails, the pre-restore safety backup can be used for recovery.
+"""
 
 
 def get_last_backup():
@@ -57,7 +72,7 @@ async def database_query_check():
             await session.execute(text("SELECT 1"))
         return True
 
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         log_message(
             f"[ERROR] [{PRINT_PREFIX}] Database query failed: {exc}"
         )
@@ -127,9 +142,35 @@ def create_database():
     )
 
 
+def create_pre_restore_backup() -> Path:
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    backup_file = BACKUP_DIR / f"pre_restore_backup_{timestamp}.sql"
+
+    command = [
+        "pg_dump",
+        "-U", POSTGRESQL_USERNAME,
+        "-h", POSTGRESQL_HOST,
+        "-p", str(POSTGRESQL_PORT),
+        "-d", POSTGRESQL_DATABASE_NAME,
+        "-f", str(backup_file),
+    ]
+
+    subprocess.run(
+        command,
+        check=True,
+        timeout=RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
+        env={**os.environ, "PGPASSWORD": POSTGRESQL_PASSWORD},
+    )
+
+    log_message(f"[INFO] [{PRINT_PREFIX}] Pre-restore safety backup created: {backup_file}")
+    return backup_file
+
+
 def restore_from_backup(backup_file):
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting restore from backup file: {backup_file}")
-    
+
+    create_pre_restore_backup()
 
     drop_database()
     create_database()
@@ -149,7 +190,7 @@ def restore_from_backup(backup_file):
             timeout=RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
             env={**os.environ, "PGPASSWORD": POSTGRESQL_PASSWORD},
         )
-    except Exception as exc:
+    except (subprocess.SubprocessError, OSError) as exc:
         log_message(f"[ERROR] [{PRINT_PREFIX}] Restore from backup failed: {exc}")
         raise
 
@@ -163,7 +204,7 @@ def remove_bad_backup(backup_file):
     try:
         backup_file.rename(destination)
         log_message(f"[INFO] [{PRINT_PREFIX}] Moved bad backup file to: {destination}")
-    except Exception as exc:
+    except (FileNotFoundError, PermissionError, OSError) as exc:
         log_message(f"[ERROR] [{PRINT_PREFIX}] Failed to move bad backup file {backup_file} to {destination}: {exc}")
         raise # Re-raise the exception to ensure the calling function is aware of the failure
 
@@ -186,7 +227,7 @@ async def healthcheck_service():
                 database_query_check(),
                 timeout=HEALTHCHECK_TIMEOUT_SECONDS,
             )
-        except Exception as exc:
+        except asyncio.TimeoutError as exc:
             log_message(f"[ERROR] [{PRINT_PREFIX}] Exception during database healthcheck: {exc}")
             check = False
 
@@ -232,14 +273,21 @@ async def healthcheck_service():
                             log_message(f"[ERROR] [{PRINT_PREFIX}] No backup found for auto-rollover, shutting down.")
                             os.kill(os.getpid(), signal.SIGINT)
 
-                    except Exception as exc:
+                    except (
+                        FileNotFoundError,
+                        PermissionError,
+                        RuntimeError,
+                        ValueError,
+                        subprocess.SubprocessError,
+                        OSError,
+                    ) as exc:
                         log_message(f"[ERROR] [{PRINT_PREFIX}] Exception during auto-rollover: {exc}")
                         log_message(f"[CRITICAL] [{PRINT_PREFIX}] Auto-rollover failed. Shutting down.")
                         os.kill(os.getpid(), signal.SIGINT)
                 else:
                     try:
                         remove_bad_backup(_last_restored_backup)
-                    except Exception as exc:
+                    except (FileNotFoundError, PermissionError, OSError) as exc:
                         log_message(f"[ERROR] [{PRINT_PREFIX}] Failed to quarantine bad backup {_last_restored_backup}: {exc}")
                         log_message(f"[CRITICAL] [{PRINT_PREFIX}] Auto-rollover already attempted and latest backup failed. Shutting down.")
                         os.kill(os.getpid(), signal.SIGINT)
