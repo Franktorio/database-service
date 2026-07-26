@@ -4,6 +4,7 @@ from fastapi import HTTPException
 
 from config.loader import RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import PERM_LEVEL_MAP
+from src.api.models import APIRequestData
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.system.api_key_crud import get_api_key
 from src.models.tables.system.api_key_table import ApiKey
@@ -122,12 +123,13 @@ def api_authentication(permission_level: int, too_soon_window_seconds: int | Non
                     log_message_for_ip(ip_address, "Insufficient permissions.", PRINT_PREFIX, level="WARNING")
                     raise HTTPException(status_code=403, detail="Insufficient permissions.")
 
-                api_data = {
-                    "api_key_fingerprint": fingerprint,
-                    "permission_level": effective_level,
-                    "permission_name": PERM_LEVEL_MAP.get(effective_level, "UNKNOWN"),
-                    "rate_limit": int(permission_payload.get("rate_limit", 0)),
-                }
+                api_data = APIRequestData(
+                    api_key_fingerprint=fingerprint,
+                    permission_level=effective_level,
+                    permission_name=PERM_LEVEL_MAP.get(effective_level, "Unknown"),
+                    rate_limit=int(permission_payload.get("rate_limit", 1)),
+                )
+                
                 if request is not None:
                     request.state.api_data = api_data
                     request._api_data = api_data

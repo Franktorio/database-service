@@ -8,6 +8,7 @@ from starlette.responses import Response
 
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
+from src.api.models import CookieRequestData
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.models.crud.system.user_crud import get_user_by_username
@@ -207,14 +208,12 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=403, detail="Insufficient role.")
 
-            request._cookie_data = {
-                "username": username,
-                "role": effective_role,
-                "token_hash": token_hash[:12],
-                "rate_limit": COOKIE_DEFAULT_RATE_LIMIT,
-                "requests_remaining": 0,
-                "seconds_since_last_request": 0.0,
-            }
+            request._cookie_data = CookieRequestData(
+                username=username,
+                role=effective_role,
+                token_hash=token_hash[:12],
+                rate_limit=COOKIE_DEFAULT_RATE_LIMIT
+            )
 
             log_message_for_ip(
                 client_ip,
