@@ -5,13 +5,15 @@
 **Scope:** Whole-project assessment against modern industry expectations for backend services (architecture, code quality, database/API/security/reliability/performance/testing/production readiness).  
 **Codebase size (approx):** 53 Python files, 0 Alembic migration files in alembic/versions.
 
+**Status note (updated):** This report was revised after the API was migrated to REST-style routes, JWT handling moved to PyJWT, and high-volume non-critical logging was reduced.
+
 ---
 
 ## Executive Summary
 
 This codebase is **more advanced than hobby code** and shows real systems thinking (auth layers, Redis-backed controls, background services, backup/recovery mechanics). It is also **not production-grade yet** by modern standards due to migration hygiene gaps, testing depth, API contract consistency, and operational safety risks.
 
-**Overall score:** **5.9 / 10**
+**Overall score:** **6.3 / 10**
 
 **Level signal:** **Mid-level engineering output with several senior-level ideas, but critical execution gaps.**
 
@@ -22,10 +24,10 @@ This codebase is **more advanced than hobby code** and shows real systems thinki
 | Category | Score (1-10) | Severity of Gaps |
 |---|---:|---|
 | 1. Project Architecture | 6 | Medium |
-| 2. Code Quality | 6 | Medium |
+| 2. Code Quality | 7 | Medium |
 | 3. Database Design | 5 | High |
-| 4. API Design | 5 | Medium |
-| 5. Security | 6 | High |
+| 4. API Design | 7 | Medium |
+| 5. Security | 7 | Medium-High |
 | 6. Reliability | 5 | High |
 | 7. Performance | 6 | Medium |
 | 8. Testing | 3 | High |
@@ -37,10 +39,10 @@ This codebase is **more advanced than hobby code** and shows real systems thinki
 ```mermaid
 pie title Category Score Distribution (out of 10)
   "Architecture" : 6
-  "Code Quality" : 6
+  "Code Quality" : 7
   "Database" : 5
-  "API" : 5
-  "Security" : 6
+  "API" : 7
+  "Security" : 7
   "Reliability" : 5
   "Performance" : 6
   "Testing" : 3
@@ -80,7 +82,7 @@ pie title Category Score Distribution (out of 10)
 
 ---
 
-## 2) Code Quality (Score: 6/10)
+## 2) Code Quality (Score: 7/10)
 
 ### What is done well
 - Naming is generally understandable and intention-revealing.
@@ -89,7 +91,6 @@ pie title Category Score Distribution (out of 10)
 - Logging is consistent in style and readable.
 
 ### What is below industry standards
-- Type correctness has significant mistakes in core request models.
 - Inconsistencies in style and semantics across modules (HTTP method conventions, return payload shape).
 - Some functions are too long/complex, especially healthcheck recovery loop.
 - Debug/log statements are verbose enough to risk noise over signal.
@@ -104,9 +105,7 @@ pie title Category Score Distribution (out of 10)
 - **Medium.** Current quality supports development, but defect risk is higher than needed.
 
 ### Concrete examples
-- Type mismatches in API model:
-  - src/api/models.py: APIRequestData.permission_level typed as str while code sets int.
-  - src/api/models.py: APIRequestData.permission_name typed as bool while code sets string.
+- Type mismatches in core API request state models were corrected (src/api/models.py).
 - Large, complex flow with many branches and side effects: src/services/system/dbhealthcheck.py.
 
 ---
@@ -140,16 +139,15 @@ pie title Category Score Distribution (out of 10)
 
 ---
 
-## 4) API Design (Score: 5/10)
+## 4) API Design (Score: 7/10)
 
 ### What is done well
 - Request validation via Pydantic is present.
 - Permission and rate-limit checks are consistently applied on admin endpoints.
 - Route grouping and prefixes are clear.
+- API surface now follows REST collection/resource conventions for keys and users.
 
 ### What is below industry standards
-- REST semantics are inconsistent (e.g., POST used for update on API keys while users use PATCH).
-- Endpoint naming is action-oriented rather than resource-oriented in several places.
 - No API versioning strategy.
 - Error payloads vary in structure (strings vs object details).
 
@@ -163,29 +161,31 @@ pie title Category Score Distribution (out of 10)
 - **Medium.** Clients can still integrate, but long-term API evolution will be painful.
 
 ### Concrete examples
-- POST update endpoint for API keys: src/api/system/api_db_endpoints/routes/_post_routes.py.
-- PATCH used in user updates: src/api/system/user_db_endpoints/routes/_patch_routes.py.
+- RESTful routes now in place:
+  - src/api/system/api_db_endpoints/routes/_post_routes.py
+  - src/api/system/api_db_endpoints/routes/_delete_routes.py
+  - src/api/system/user_db_endpoints/routes/_patch_routes.py
 - Non-uniform detail payloads in auth decorators: src/security/validation/api_security.py, src/security/validation/cookie_security.py.
 
 ---
 
-## 5) Security (Score: 6/10)
+## 5) Security (Score: 7/10)
 
 ### What is done well
 - Good baseline: hashed tokens with pepper, PBKDF2 password hashing with salt + iterations.
 - Secure comparison for sensitive values (hmac.compare_digest).
 - Startup secret-safety enforcement outside development mode.
 - Multiple protective layers: API key auth, cookie auth, rate limiting, IP blocking.
+- JWT handling now uses a maintained library (PyJWT) rather than a custom implementation.
 
 ### What is below industry standards
-- Custom JWT implementation increases security maintenance risk versus hardened library behavior.
 - Cookie auth design has no explicit CSRF strategy beyond SameSite=lax.
 - Setup scripts can expose secrets in command invocation/log context.
 - Security controls are process-centric and can degrade in distributed deployments.
 
 ### What a senior engineer would likely change
-- Replace custom JWT implementation with vetted library + claims policy (iss/aud/nbf/jti, key rotation strategy).
 - Add CSRF protection pattern for cookie-backed auth workflows.
+- Expand claims policy (iss/aud/nbf/jti) and add key rotation policy/documentation.
 - Remove plain-text secret leakage vectors in scripts and command logging.
 - Add threat-model and security regression tests.
 
@@ -193,7 +193,7 @@ pie title Category Score Distribution (out of 10)
 - **High** if internet-exposed without compensating controls.
 
 ### Concrete examples
-- Custom JWT encode/decode: src/security/tokens.py.
+- PyJWT-based encode/decode now in use: src/security/tokens.py.
 - Cookie settings and no CSRF token mechanism: src/security/tokens.py, src/security/validation/cookie_security.py.
 - Redis setup command includes password argument and command logging: tools/scripts/setup_redis.py.
 
@@ -323,7 +323,7 @@ pie title Category Score Distribution (out of 10)
   - Reasonable module decomposition and naming discipline.
 - Mid/junior signals holding it back:
   - Missing migration discipline.
-  - Inconsistent API semantics and model typing mistakes in central paths.
+  - API versioning/contract consistency still incomplete.
   - Testing strategy too narrow for safe iterative development.
   - Production hardening and observability incomplete.
 
@@ -332,7 +332,7 @@ pie title Category Score Distribution (out of 10)
 
 ### Concrete examples
 - Strong: src/security/tokens.py, src/security/validation/*.py, src/services/system/backup.py.
-- Weak: src/api/models.py typing errors, alembic/versions empty, limited tests in tools/tests/live_system_api_test.py.
+- Weak: alembic/versions empty, limited tests in tools/tests/live_system_api_test.py.
 
 ---
 
@@ -346,21 +346,21 @@ pie title Category Score Distribution (out of 10)
 6. Backup and healthcheck services indicate operational ownership.
 7. Auth cookie revocation model tracks token lifecycle in DB.
 8. Composite and uniqueness indexes used for key access patterns.
-9. Reusable decorators reduce copy-paste security logic.
-10. End-to-end live test script exercises many critical flows.
+9. RESTful API surface now consistently uses resource-oriented routes.
+10. Reusable decorators reduce copy-paste security logic.
 
 ## Top 10 Weaknesses
 
 1. No migration history despite Alembic integration.
-2. Type definition errors in central API request state model.
-3. Inconsistent REST semantics and route conventions.
-4. Weak automated testing strategy beyond a live script.
-5. Blocking subprocess operations in fault-recovery paths.
-6. Single-process architecture for API + background jobs increases blast radius.
-7. Setup scripts can expose secret values and assume privileged host access.
-8. No clear API versioning and weak response contract consistency.
-9. Limited observability beyond logs (no metrics/tracing).
-10. Potential schema evolution pain from roles-as-array design.
+2. Weak automated testing strategy beyond a live script.
+3. Blocking subprocess operations in fault-recovery paths.
+4. Single-process architecture for API + background jobs increases blast radius.
+5. Setup scripts can expose secret values and assume privileged host access.
+6. No clear API versioning and weak response contract consistency.
+7. Limited observability beyond logs (no metrics/tracing).
+8. Potential schema evolution pain from roles-as-array design.
+9. No formal migration pipeline integrated into delivery.
+10. Recovery logic complexity raises maintenance risk.
 
 ---
 
@@ -370,7 +370,7 @@ pie title Category Score Distribution (out of 10)
 - **Single-process coupling of API runtime with operational jobs and recovery flows.** Under severe failure, recovery/maintenance behavior can impact request-serving stability.
 
 ### Biggest security concern
-- **Custom JWT implementation and cookie session strategy without stronger standards-based hardening (claims policy, rotation model, CSRF posture).**
+- **Cookie-session hardening remains incomplete (CSRF posture and formal claims/rotation policy), even after moving JWT handling to PyJWT.**
 
 ### Biggest scalability concern
 - **Lack of pagination and fully centralized per-request auth checks/logging on hot paths; this will hit throughput and latency sooner than expected.**
@@ -401,9 +401,8 @@ pie title Category Score Distribution (out of 10)
 
 ## Suggested Priority Order (Practical Roadmap)
 
-1. Fix type/model correctness defects in API request state models.
-2. Establish and enforce Alembic migration workflow with baseline revision.
-3. Add pytest-based unit + integration suite and CI gate.
-4. Standardize API contracts and introduce versioning.
-5. Isolate operational jobs/recovery flows from API serving process.
-6. Upgrade auth/session hardening and observability stack.
+1. Establish and enforce Alembic migration workflow with baseline revision.
+2. Add pytest-based unit + integration suite and CI gate.
+3. Standardize API response/error contracts and introduce versioning.
+4. Isolate operational jobs/recovery flows from API serving process.
+5. Upgrade auth/session hardening and observability stack.
