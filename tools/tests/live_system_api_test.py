@@ -64,8 +64,8 @@ def _step_get_root(session: requests.Session, base_url: str, steps: list[dict[st
 
 
 def _step_get_key_admin_root(session: requests.Session, base_url: str, steps: list[dict[str, Any]]) -> None:
-    resp = session.get(f"{base_url}/api/db/keys/", timeout=20)
-    _record(steps, "GET /api/db/keys/", resp, 200, "Key admin root should be online")
+    resp = session.get(f"{base_url}/api/db/keys", timeout=20)
+    _record(steps, "GET /api/db/keys", resp, 401, "Collection endpoint requires API key")
 
 
 def _step_api_auth_test(
@@ -84,8 +84,8 @@ def _step_list_api_keys(
     headers: dict[str, str],
     steps: list[dict[str, Any]],
 ) -> None:
-    resp = session.get(f"{base_url}/api/db/keys/list", headers=headers, timeout=20)
-    _record(steps, "GET /api/db/keys/list", resp, 200, "List API keys with super admin")
+    resp = session.get(f"{base_url}/api/db/keys", headers=headers, timeout=20)
+    _record(steps, "GET /api/db/keys", resp, 200, "List API keys with super admin")
 
 
 def _step_create_api_key(
@@ -96,12 +96,12 @@ def _step_create_api_key(
     steps: list[dict[str, Any]],
 ) -> None:
     resp = session.post(
-        f"{base_url}/api/db/keys/create",
+        f"{base_url}/api/db/keys",
         headers=headers,
         json={"permission_level": 1, "rate_limit": 321, "email": state["api_email"]},
         timeout=20,
     )
-    created = _record(steps, "POST /api/db/keys/create", resp, 200, "Create non-super-admin API key")
+    created = _record(steps, "POST /api/db/keys", resp, 200, "Create non-super-admin API key")
     if not created:
         return
 
@@ -124,7 +124,7 @@ def _step_update_api_key(
     if not key_hash:
         steps.append(
             {
-                "name": "POST /api/db/keys/update",
+                "name": "PATCH /api/db/keys/{key_hash}",
                 "ok": False,
                 "status_code": None,
                 "expected_status": 200,
@@ -133,18 +133,17 @@ def _step_update_api_key(
         )
         return
 
-    resp = session.post(
-        f"{base_url}/api/db/keys/update",
+    resp = session.patch(
+        f"{base_url}/api/db/keys/{key_hash}",
         headers=headers,
         json={
-            "key_hash": key_hash,
             "new_permission_level": 2,
             "new_rate_limit": 30,
             "new_email": state["api_updated_email"],
         },
         timeout=20,
     )
-    _record(steps, "POST /api/db/keys/update", resp, 200, "Update key metadata")
+    _record(steps, "PATCH /api/db/keys/{key_hash}", resp, 200, "Update key metadata")
 
 
 def _step_rate_limit_test(
@@ -217,7 +216,7 @@ def _step_create_user(
     steps: list[dict[str, Any]],
 ) -> None:
     resp = session.post(
-        f"{base_url}/api/db/users/create",
+        f"{base_url}/api/db/users",
         headers=headers,
         json={
             "username": state["username"],
@@ -228,7 +227,7 @@ def _step_create_user(
         },
         timeout=20,
     )
-    _record(steps, "POST /api/db/users/create", resp, 200, "Create dynamic test user")
+    _record(steps, "POST /api/db/users", resp, 200, "Create dynamic test user")
 
 
 def _step_list_users(
@@ -238,14 +237,14 @@ def _step_list_users(
     state: dict[str, Any],
     steps: list[dict[str, Any]],
 ) -> None:
-    resp = session.get(f"{base_url}/api/db/users/list", headers=headers, timeout=20)
+    resp = session.get(f"{base_url}/api/db/users", headers=headers, timeout=20)
     found_user = False
     if resp.status_code == 200:
         payload = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
         users = payload.get("users", []) if isinstance(payload, dict) else []
         if isinstance(users, list):
             found_user = any(isinstance(row, dict) and row.get("username") == state["username"] for row in users)
-    _record(steps, "GET /api/db/users/list", resp, 200, f"Created user visible in list={found_user}")
+    _record(steps, "GET /api/db/users", resp, 200, f"Created user visible in list={found_user}")
 
 
 def _step_get_user(
@@ -281,12 +280,12 @@ def _step_update_user(
     steps: list[dict[str, Any]],
 ) -> None:
     resp = session.patch(
-        f"{base_url}/api/db/users/update",
+        f"{base_url}/api/db/users/{state['username']}",
         headers=headers,
-        json={"username": state["username"], "new_email": state["updated_email"], "add_role": "auditor"},
+        json={"new_email": state["updated_email"], "add_role": "auditor"},
         timeout=20,
     )
-    _record(steps, "PATCH /api/db/users/update", resp, 200, "Update email and roles")
+    _record(steps, "PATCH /api/db/users/{username}", resp, 200, "Update email and roles")
 
 
 def _step_update_user_login_rate_limit(
@@ -297,12 +296,12 @@ def _step_update_user_login_rate_limit(
     steps: list[dict[str, Any]],
 ) -> None:
     resp = session.patch(
-        f"{base_url}/api/db/users/login-rate-limit",
+        f"{base_url}/api/db/users/{state['username']}/login-rate-limit",
         headers=headers,
-        json={"username": state["username"], "new_login_rate_limit": 15},
+        json={"new_login_rate_limit": 15},
         timeout=20,
     )
-    _record(steps, "PATCH /api/db/users/login-rate-limit", resp, 200, "Update user login rate limit")
+    _record(steps, "PATCH /api/db/users/{username}/login-rate-limit", resp, 200, "Update user login rate limit")
 
 
 def _step_update_user_password(
@@ -313,12 +312,12 @@ def _step_update_user_password(
     steps: list[dict[str, Any]],
 ) -> None:
     resp = session.patch(
-        f"{base_url}/api/db/users/password",
+        f"{base_url}/api/db/users/{state['username']}/password",
         headers=headers,
-        json={"username": state["username"], "new_password": state["new_password"]},
+        json={"new_password": state["new_password"]},
         timeout=20,
     )
-    _record(steps, "PATCH /api/db/users/password", resp, 200, "Rotate user password")
+    _record(steps, "PATCH /api/db/users/{username}/password", resp, 200, "Rotate user password")
 
 
 def _step_login_old_password_rejected(
@@ -362,25 +361,25 @@ def _step_delete_api_key(
     steps: list[dict[str, Any]],
 ) -> None:
     token = state.get("created_api_token")
-    if not token:
+    key_hash = state.get("created_api_key_hash")
+    if not token or not key_hash:
         steps.append(
             {
-                "name": "DELETE /api/db/keys/delete",
+                "name": "DELETE /api/db/keys/{key_hash}",
                 "ok": False,
                 "status_code": None,
                 "expected_status": 200,
-                "details": "Skipped because created API key token is unavailable.",
+                "details": "Skipped because created API key token/hash is unavailable.",
             }
         )
         return
 
     resp = session.delete(
-        f"{base_url}/api/db/keys/delete",
+        f"{base_url}/api/db/keys/{key_hash}",
         headers=headers,
-        json={"target_api_key": token},
         timeout=20,
     )
-    _record(steps, "DELETE /api/db/keys/delete", resp, 200, "Delete created API key")
+    _record(steps, "DELETE /api/db/keys/{key_hash}", resp, 200, "Delete created API key")
 
 
 def _step_delete_user(
@@ -391,12 +390,11 @@ def _step_delete_user(
     steps: list[dict[str, Any]],
 ) -> None:
     resp = session.delete(
-        f"{base_url}/api/db/users/delete",
+        f"{base_url}/api/db/users/{state['username']}",
         headers=headers,
-        json={"username": state["username"]},
         timeout=20,
     )
-    _record(steps, "DELETE /api/db/users/delete", resp, 200, "Delete dynamic user")
+    _record(steps, "DELETE /api/db/users/{username}", resp, 200, "Delete dynamic user")
 
 
 def run_system_api_live_test() -> dict[str, Any]:

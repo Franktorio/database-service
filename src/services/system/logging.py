@@ -23,6 +23,28 @@ _worker_started = False
 
 _warned_incase_logging_not_started = False  # Flag to ensure we only warn once if logging is not started
 
+ABUSE_WARNING_KEYWORDS = (
+    "rate limit",
+    "blocked",
+    "insufficient",
+    "authentication failed",
+    "invalid",
+    "missing",
+    "revoked",
+    "expired",
+    "unknown username",
+    "unregistered",
+)
+
+
+def _should_emit_log(message: str) -> bool:
+    if message.startswith("[ERROR]") or message.startswith("[CRITICAL]"):
+        return True
+    if message.startswith("[WARNING]"):
+        lowered = message.lower()
+        return any(keyword in lowered for keyword in ABUSE_WARNING_KEYWORDS)
+    return False
+
 def _build_logger() -> logging.Logger:
     logger = logging.getLogger("database_service")
     logger.setLevel(logging.DEBUG if DEBUG_ENABLED else logging.INFO)
@@ -66,6 +88,9 @@ def initialize_logging() -> None:
 def log_message(*args: Any, **kwargs: Any) -> None:
     """Log a message with print-like call style."""
     message = " ".join(str(arg) for arg in args)
+
+    if not message or not _should_emit_log(message):
+        return
     
     if not _worker_started:
         global _warned_incase_logging_not_started
@@ -73,9 +98,6 @@ def log_message(*args: Any, **kwargs: Any) -> None:
             print(f"[WARNING] [{PRINT_PREFIX}] Logging worker not started. Messages will be printed directly:")
             _warned_incase_logging_not_started = True
         print(message)
-        return
-
-    if not message:
         return
     
     try:

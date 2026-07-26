@@ -13,7 +13,7 @@ from src.services.system.logging import log_message
 PRINT_PREFIX = "POST USER DB ROUTES"
 
 
-@router.post("/create")
+@router.post("")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def create_user(request: Request, model: UserCreateRequest):

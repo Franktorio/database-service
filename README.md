@@ -176,7 +176,6 @@ python3 tools/tests/live_system_api_test.py
 Public/test endpoints:
 
 - `GET /`
-- `GET /api/db/keys/`
 
 Conditional test/auth utility endpoints (`API_EXPOSE_TEST_ENDPOINTS=true`):
 
@@ -186,17 +185,17 @@ Conditional test/auth utility endpoints (`API_EXPOSE_TEST_ENDPOINTS=true`):
 
 SUPER_ADMIN API-key-protected endpoints:
 
-- `GET /api/db/keys/list`
-- `POST /api/db/keys/create`
-- `POST /api/db/keys/update`
-- `DELETE /api/db/keys/delete`
-- `GET /api/db/users/list`
+- `GET /api/db/keys`
+- `POST /api/db/keys`
+- `PATCH /api/db/keys/{key_hash}`
+- `DELETE /api/db/keys/{key_hash}`
+- `GET /api/db/users`
 - `GET /api/db/users/{username}`
-- `POST /api/db/users/create`
-- `PATCH /api/db/users/update`
-- `PATCH /api/db/users/password`
-- `PATCH /api/db/users/login-rate-limit`
-- `DELETE /api/db/users/delete`
+- `POST /api/db/users`
+- `PATCH /api/db/users/{username}`
+- `PATCH /api/db/users/{username}/password`
+- `PATCH /api/db/users/{username}/login-rate-limit`
+- `DELETE /api/db/users/{username}`
 
 Important request-format note:
 

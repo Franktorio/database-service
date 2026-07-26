@@ -4,9 +4,9 @@
 import secrets
 import hashlib
 import hmac
-import base64
-import json
 from datetime import datetime, timedelta, timezone
+import jwt
+from jwt import ExpiredSignatureError, InvalidTokenError
 
 from config.loader import (
     API_KEY_PEPPER,
@@ -25,20 +25,6 @@ from src.models.crud.system.api_key_crud import add_api_key, get_api_key
 from src.models.crud.system.auth_cookie_crud import add_auth_cookie
 from src.models.crud.system.user_crud import get_user_by_username
 from src.services.system.logging import log_message
-
-
-def _b64url_encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
-
-
-def _b64url_decode(data: str) -> bytes:
-    padding = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(f"{data}{padding}".encode("ascii"))
-
-
-def _jwt_sign(message: bytes) -> str:
-    signature = hmac.new(JWT_SECRET.encode("utf-8"), message, hashlib.sha256).digest()
-    return _b64url_encode(signature)
 
 def generate_token() -> str:
     """Generate a new API key token."""
@@ -96,9 +82,6 @@ def create_jwt_token(
     expires_minutes: int = JWT_EXP_MINUTES,
 ) -> tuple[str, datetime]:
     """Create a signed JWT token for cookie authentication."""
-    if JWT_ALGORITHM != "HS256":
-        raise ValueError("Only HS256 is supported by the built-in JWT implementation.")
-
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=expires_minutes)
     payload = {
@@ -109,45 +92,18 @@ def create_jwt_token(
     }
     if user_id is not None:
         payload["user_id"] = user_id
-    header = {"alg": "HS256", "typ": "JWT"}
-    header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
-    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
-    signature_b64 = _jwt_sign(signing_input)
-    token = f"{header_b64}.{payload_b64}.{signature_b64}"
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return token, expires_at
 
 
 def decode_jwt_token(token: str) -> dict | None:
     """Decode and validate a JWT token payload."""
     try:
-        if JWT_ALGORITHM != "HS256":
-            raise ValueError("Only HS256 is supported by the built-in JWT implementation.")
-
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
-
-        header_b64, payload_b64, signature_b64 = parts
-        signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
-        expected_signature = _jwt_sign(signing_input)
-        if not hmac.compare_digest(signature_b64, expected_signature):
-            return None
-
-        header_raw = _b64url_decode(header_b64)
-        payload_raw = _b64url_decode(payload_b64)
-        header = json.loads(header_raw.decode("utf-8"))
-        payload = json.loads(payload_raw.decode("utf-8"))
-
-        if header.get("alg") != "HS256":
-            return None
-
-        exp = int(payload.get("exp", 0))
-        if exp <= int(datetime.now(timezone.utc).timestamp()):
-            return None
-
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
-    except (ValueError, TypeError, json.JSONDecodeError):
+    except ExpiredSignatureError:
+        return None
+    except (InvalidTokenError, ValueError, TypeError):
         log_message("[WARNING] [API KEYS] Invalid JWT token presented.")
         return None
 

@@ -12,15 +12,7 @@ from src.services.system.logging import log_message
 
 PRINT_PREFIX = "GET API DB ROUTES"
 
-
-@router.get("/")
-@with_ip_block
-async def api_db_root(request: Request):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received GET /api/db/keys request.")
-    return {"message": "API key administration endpoint is online."}
-
-
-@router.get("/list")
+@router.get("")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def list_api_keys(request: Request):

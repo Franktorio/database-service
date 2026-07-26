@@ -51,14 +51,9 @@ Base prefix: `/api/db/keys`
 
 Endpoints in this section have mixed authorization:
 
-- `GET /api/db/keys/` is public (IP block middleware still applies).
-- The remaining API-key administration endpoints require `SUPER_ADMIN_LEVEL`.
+All API-key administration endpoints require `SUPER_ADMIN_LEVEL`.
 
-### `GET /api/db/keys/`
-
-Simple availability message for the API-key administration surface.
-
-### `GET /api/db/keys/list`
+### `GET /api/db/keys`
 
 Lists stored API keys.
 
@@ -81,7 +76,7 @@ Response shape:
 }
 ```
 
-### `POST /api/db/keys/create`
+### `POST /api/db/keys`
 
 Creates a non-SUPER_ADMIN API key.
 
@@ -111,32 +106,23 @@ Response includes the raw token once:
 }
 ```
 
-### `POST /api/db/keys/update`
+### `PATCH /api/db/keys/{key_hash}`
 
-Updates an API key by `key_hash`.
+Updates an API key by path `key_hash`.
 
 Request body:
 
 ```json
 {
-  "key_hash": "target-key-hash",
   "new_permission_level": 2,
   "new_rate_limit": 500,
   "new_email": "service-updated@example.com"
 }
 ```
 
-### `DELETE /api/db/keys/delete`
+### `DELETE /api/db/keys/{key_hash}`
 
-Deletes an API key by hashing the supplied raw target token.
-
-Request body:
-
-```json
-{
-  "target_api_key": "raw-token-to-delete"
-}
-```
+Deletes an API key by path `key_hash`.
 
 ## User Administration
 
@@ -144,7 +130,7 @@ Base prefix: `/api/db/users`
 
 All endpoints in this section require `SUPER_ADMIN_LEVEL`.
 
-### `GET /api/db/users/list`
+### `GET /api/db/users`
 
 Lists all users.
 
@@ -152,7 +138,7 @@ Lists all users.
 
 Fetches a single user by username.
 
-### `POST /api/db/users/create`
+### `POST /api/db/users`
 
 Creates a user and hashes the submitted password.
 
@@ -168,7 +154,7 @@ Request body:
 }
 ```
 
-### `PATCH /api/db/users/update`
+### `PATCH /api/db/users/{username}`
 
 Updates user email and/or roles.
 
@@ -176,26 +162,23 @@ Request body examples:
 
 ```json
 {
-  "username": "alice",
   "set_roles": ["admin", "editor"]
 }
 ```
 
 ```json
 {
-  "username": "alice",
   "add_role": "auditor"
 }
 ```
 
 ```json
 {
-  "username": "alice",
   "remove_role": "editor"
 }
 ```
 
-### `PATCH /api/db/users/password`
+### `PATCH /api/db/users/{username}/password`
 
 Replaces password hash metadata for a user.
 
@@ -203,12 +186,11 @@ Request body:
 
 ```json
 {
-  "username": "alice",
   "new_password": "new-secret"
 }
 ```
 
-### `PATCH /api/db/users/login-rate-limit`
+### `PATCH /api/db/users/{username}/login-rate-limit`
 
 Updates the per-user password-login rate limit.
 
@@ -216,22 +198,13 @@ Request body:
 
 ```json
 {
-  "username": "alice",
   "new_login_rate_limit": 20
 }
 ```
 
-### `DELETE /api/db/users/delete`
+### `DELETE /api/db/users/{username}`
 
-Deletes a user by username.
-
-Request body:
-
-```json
-{
-  "username": "alice"
-}
-```
+Deletes a user by username path parameter.
 
 ## Security Notes
 

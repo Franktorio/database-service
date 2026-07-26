@@ -17,20 +17,12 @@ class ApiKeyCreateRequest(BaseModel):
     rate_limit: int = Field(default=1000, ge=1, description="Maximum number of requests per minute.")
     email: Optional[str] = Field(default=None, description="Optional email address associated with the API key.")
 
+class ApiKeyPatchRequest(BaseModel):
+    """Request body for RESTful API key patch endpoint."""
 
-class ApiKeyUpdateRequest(BaseModel):
-    """Request body for updating an existing API key."""
-
-    key_hash: str = Field(..., description="Hash of the API key to update.")
     new_permission_level: Optional[int] = Field(default=None, ge=VIEW_LEVEL, le=SUPER_ADMIN_LEVEL, description="Optional replacement permission level.")
     new_rate_limit: Optional[int] = Field(default=None, ge=1, description="Optional replacement requests-per-minute limit.")
     new_email: Optional[str] = Field(default=None, description="Optional replacement email associated with the API key.")
-
-
-class ApiKeyDeleteRequest(BaseModel):
-    """Request body for deleting an API key token."""
-
-    target_api_key: str = Field(..., description="API key token to delete.")
 
 
 log_message(f"[DEBUG] [{PRINT_PREFIX}] API key admin request models loaded.")

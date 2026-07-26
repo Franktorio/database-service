@@ -10,7 +10,7 @@ from src.services.system.logging import log_message
 PRINT_PREFIX = "GET USER DB ROUTES"
 
 
-@router.get("/list")
+@router.get("")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def list_users(request: Request):

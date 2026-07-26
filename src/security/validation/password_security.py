@@ -122,5 +122,5 @@ async def auth_and_grant_token(username: str, password: str, ip_address: str, ex
         role=user.role,
         expires_minutes=expiration or 10,
     )
-    return token, expiration
+    return token, (expiration or 10)
     

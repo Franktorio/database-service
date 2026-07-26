@@ -21,8 +21,8 @@ class APIRequestData(BaseModel):
     """Data model for API request data which is injected into the request context."""
     
     api_key_fingerprint: str = Field(..., description="API key fingerprint provided by the client.")
-    permission_level: str = Field(..., description="Permission level of the API key.")
-    permission_name: bool = Field(..., description="Vanity name flag for the permission level.")
+    permission_level: int = Field(..., description="Permission level of the API key.")
+    permission_name: str = Field(..., description="Display name for the permission level.")
     rate_limit: int = Field(..., description="Rate limit for the API key.")
 
 class CookieRequestData(BaseModel):
