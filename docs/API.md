@@ -10,6 +10,14 @@ This service exposes a small administrative API plus optional authentication tes
 - API-key-protected endpoints require `Authorization: Bearer <api_key>`.
 - Rate-limit counters are stored in Redis; protected auth routes return `503` if Redis is unavailable.
 
+IP blocking defaults (app-level):
+
+- `IP_BLOCKING_ENABLED='true'`
+- `IP_BLOCKING_THRESHOLD='200'`
+- `IP_BLOCKING_TIME_WINDOW='15'`
+- `IP_BLOCKING_DURATION='1800'`
+- Default behavior: 200 requests within 15 seconds blocks that IP for 30 minutes.
+
 Authorization format for API-key-protected endpoints:
 
 ```http
@@ -215,7 +223,7 @@ Deletes a user by username path parameter.
 
 ## Known Gaps
 
-- Temporary IP block metadata is still process-local, even though limiter counters are Redis-backed.
+- IP block duration and Redis key TTL are independently configurable; a TTL shorter than block duration can clear a block earlier than intended.
 - Persistent logging occurs on auth success and failure paths, which adds DB dependency to control-plane traffic.
 
 ## Live Test Notes

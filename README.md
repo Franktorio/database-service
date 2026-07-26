@@ -92,6 +92,14 @@ Also supported:
 - `REDIS_PORT`
 - `REDIS_PASSWORD`
 
+IP blocking defaults (app-level):
+
+- `IP_BLOCKING_ENABLED='true'`
+- `IP_BLOCKING_THRESHOLD='200'`
+- `IP_BLOCKING_TIME_WINDOW='15'`
+- `IP_BLOCKING_DURATION='1800'`
+- Default behavior: 200 requests within 15 seconds blocks that IP for 30 minutes.
+
 Secret-safety behavior:
 
 - In non-development mode, unsafe defaults for PostgreSQL password, API-key pepper, password pepper, JWT secret, and Redis password raise at startup.
