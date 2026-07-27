@@ -45,4 +45,4 @@ src/models/crud/system/<feature_table>_crud.py
 - Update `README.md` when the public surface or deployment behavior changes.
 - Update `docs/API.md` when endpoints, methods, auth semantics, or payloads change.
 - Update `docs/DB.md` when schema, indexes, migration behavior, or operational assumptions change.
-- Update `docs/CODEBASE_REPORT.md` when a major audit materially changes the current assessment.
+- Update `docs/ENGINEERING_REVIEW_2026-07-26.md` when a major audit materially changes the current assessment.

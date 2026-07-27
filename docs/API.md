@@ -105,7 +105,6 @@ Response includes the raw token once:
   "message": "API key created successfully.",
   "api_key": {
     "token": "raw-token",
-    "key_hash": "hashed-token",
     "permission_level": 1,
     "permission_name": "EDIT",
     "rate_limit": 300,
@@ -224,7 +223,7 @@ Deletes a user by username path parameter.
 ## Known Gaps
 
 - IP block duration and Redis key TTL are independently configurable; a TTL shorter than block duration can clear a block earlier than intended.
-- Persistent logging occurs on auth success and failure paths, which adds DB dependency to control-plane traffic.
+- API and auth paths still mix control logic with request serving, so startup and maintenance behavior should be treated as part of the app runtime.
 
 ## Live Test Notes
 

@@ -19,12 +19,12 @@ Current behavior in practice:
 - Connection pooling uses NullPool, so every session checkout opens a fresh DB connection and closes on return.
 - Session factory is async_sessionmaker with expire_on_commit=False.
 - SQL echo is enabled only when OPERATING_MODE is development.
-- Schema bootstrap is metadata-driven (no migration framework in the request path).
+- Schema changes are managed through Alembic revisions under migrations/versions; runtime init only verifies connectivity.
 
 Operational implications:
 
 - NullPool simplifies lifecycle and avoids stale pooled sockets, but increases connection churn under load.
-- With frequent short DB operations (auth checks, persistent logging), per-request connect/disconnect overhead is non-trivial.
+- With frequent short DB operations (auth checks), per-request connect/disconnect overhead is non-trivial.
 - Because expire_on_commit=False, ORM instances remain usable after commit without implicit refresh. This improves endpoint ergonomics, but stale-field assumptions can slip into multi-step flows if code reuses old objects.
 
 ## Startup and DB Readiness Sequencing
@@ -36,7 +36,7 @@ Observed sequence:
 - main.py creates a DBReadySignal and starts the backup thread with that signal.
 - API server starts via Uvicorn.
 - FastAPI lifespan startup calls init_db().
-- Lifespan then starts async tasks (healthcheck, cookie-expiry, ratelimit-cache, and ip-block-cache) on the same event loop.
+- Lifespan then starts enabled async tasks such as healthcheck and cookie-expiry on the same event loop.
 - DBReadySignal is set ready after DB initialization, allowing backup loop startup.
 
 What this fixes:
@@ -51,22 +51,20 @@ Residual caveat:
 
 ## Schema Initialization Semantics
 
-Schema initialization is performed by init_db in src/models/database.py.
+Schema initialization is handled outside the request path through Alembic. Runtime init_db in src/models/database.py only verifies connectivity.
 
 Detailed behavior:
 
-- Base.metadata.create_all runs during API lifespan startup.
-- After table creation, code iterates all declared table.indexes and calls create(checkfirst=True).
+- Alembic revisions capture schema changes.
 
 Why this matters:
 
-- New declared indexes can be added to existing deployments without dropping/recreating tables.
-- checkfirst=True avoids duplicate-index failures on already converged databases.
+- Schema changes are explicit and reviewable.
+- Runtime startup no longer mutates schema objects.
 
 Nitpicky notes:
 
-- create_all is additive and non-destructive; it does not handle column renames, type rewrites, constraint rewrites, or data backfills.
-- There is no schema version table or migration history ledger.
+- Alembic version tracking now provides the schema history ledger.
 - init_db now does a simple connectivity check and emits only a single startup info log.
 
 ## Current Tables
@@ -151,28 +149,7 @@ Design notes:
 - ON DELETE CASCADE keeps auth_cookies consistent when a user row is removed.
 
 ### persistent_logs
-
-Purpose:
-
-- Stores authentication, rate-limit, and IP-block events for persistent observability.
-
-Key fields:
-
-- id: integer PK.
-- log_type: non-null string in DB (typed as Literal in Python).
-- log_level: non-null string in DB (typed as Literal in Python).
-- message: non-null.
-- ip_address: nullable.
-- created_at: timezone-aware server_default now().
-
-Indexes:
-
-- created_at index for recent-first reads and age-based cleanup.
-
-Design caveats:
-
-- Python Literal hints do not create DB constraints; DB accepts any string unless external constraints are added.
-- This is acceptable for internal-write-only paths, but strict audit pipelines often require ENUM/check constraints.
+This table and the associated persistent-log CRUD path were removed from the current codebase.
 
 ## CRUD and Transaction Conventions
 
@@ -204,19 +181,16 @@ The auth stack is DB-coupled in specific places:
 
 - API key auth:
 	- Cache miss reads api_keys by key_hash.
-	- Success and failure paths write persistent_logs (best effort).
 	- Rate-limit state is persisted in Redis and accessed through local limiter wrappers.
 - Password auth:
 	- Reads users by username.
-	- Writes persistent_logs for success/failure/rate-limit outcomes.
 	- User-specific password ratelimit state is persisted in Redis.
 - Cookie issuance:
 	- New JWT hash is persisted in auth_cookies.
 
 Operational implication:
 
-- Persistent logging increases write volume on control-plane paths by design.
-- This improves auditability but can amplify DB dependency during auth bursts.
+- Auth paths still include both DB reads and Redis-backed state changes, so request latency is sensitive to cache misses and DB health.
 
 ## Background Services Touching the Database
 
@@ -301,7 +275,7 @@ Scaling caveat:
 4. Add pre-restore backup validation beyond size checks.
 5. Encode DB credentials safely when constructing DATABASE_URL.
 6. Consider selective pooling strategy for production throughput.
-7. Add DB-level constraints for persistent_logs type/level if strict audit taxonomy is required.
+ 7. Add stricter DB-level constraints for any future audit/event tables if persistent observability is reintroduced.
 
 ## Bottom Line
 

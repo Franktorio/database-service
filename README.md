@@ -5,7 +5,7 @@ Async FastAPI + PostgreSQL service for small-scale administrative database opera
 - API-key-protected system administration endpoints.
 - User account CRUD with password hashing and cookie-based login.
 - Redis-backed token-bucket rate limiting for API keys, login attempts, cookie sessions, and IP blocking (with in-process cache wrappers).
-- Background backup, cookie-expiry cleanup, DB healthcheck, and cache cleanup services.
+- Background backup, cookie-expiry cleanup, and DB healthcheck services.
 - PostgreSQL bootstrap and schema-migration helper scripts.
 
 ## What It Actually Contains
@@ -15,7 +15,6 @@ System tables currently managed by the service:
 - `users`
 - `api_keys`
 - `auth_cookies`
-- `persistent_logs`
 
 Important index coverage:
 
@@ -25,7 +24,6 @@ Important index coverage:
 - `auth_cookies.token_hash` via unique constraint.
 - `auth_cookies.username` explicit index.
 - `auth_cookies(expires_at, revoked)` explicit composite index.
-- `persistent_logs.created_at` explicit index.
 
 ## Technology Stack
 
@@ -41,8 +39,8 @@ Startup flow today:
 1. Logging is initialized in `main.py`.
 2. Backup daemon thread is started and waits for DB ready signal.
 3. Uvicorn starts the FastAPI app.
-4. During API lifespan startup, SQLAlchemy creates tables and any declared missing indexes with `checkfirst=True`.
-5. Async service loops (DB healthcheck, cookie expiry, IP-block cache cleanup, and API-key ratelimit cache cleanup) start as FastAPI lifespan tasks on the same event loop.
+4. During API lifespan startup, the app verifies DB connectivity.
+5. Async service loops (DB healthcheck and cookie expiry) start as FastAPI lifespan tasks on the same event loop when enabled.
 
 Primary code areas:
 
@@ -52,7 +50,7 @@ Primary code areas:
 - `src/api`: app registration, request models, and admin route surfaces.
 - `src/models`: SQLAlchemy base, DB engine, table models, CRUD helpers.
 - `src/security`: API key auth, cookie auth, password auth, token utilities, IP blocking, rate limiting.
-- `src/services`: backup, DB healthcheck, cookie-expiry sweep, logging, cache cleanup.
+- `src/services`: backup, DB healthcheck, cookie-expiry sweep, logging, and cache helpers.
 - `tools/scripts`: PostgreSQL setup, Redis setup, API key bootstrap, schema migration, and backup apply utilities.
 
 ## Configuration
@@ -235,6 +233,12 @@ Run schema-first migration copy/swap:
 python3 -m tools.scripts.migrate_db
 ```
 
+Apply Alembic revisions:
+
+```bash
+alembic upgrade head
+```
+
 Apply a SQL backup file:
 
 ```bash
@@ -304,5 +308,4 @@ These are current design realities, not aspirational behavior:
 - API reference: `docs/API.md`
 - Database reference: `docs/DB.md`
 - Expansion pattern: `docs/API_DB_FORMAT.md`
-- Full codebase review: `docs/CODEBASE_REPORT.md`
-- Security review: `docs/SECURITY_REPORT.md`
+- Full codebase review: `docs/ENGINEERING_REVIEW_2026-07-26.md`

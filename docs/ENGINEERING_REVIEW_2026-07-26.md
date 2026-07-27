@@ -108,7 +108,6 @@ If deployed as-is on a single VPS, it can serve moderate internal/admin workload
 
 - Embedded service loops: `src/api/app.py`, `src/services/system/backup.py`, `src/services/system/dbhealthcheck.py`
 - No meaningful Alembic revisions directory content: `alembic/versions/`
-- Stale artifact in source tree: `src/models/crud/system/persistent_logs_crud.py.temp`
 
 ---
 
@@ -139,8 +138,7 @@ If deployed as-is on a single VPS, it can serve moderate internal/admin workload
 **Concrete examples**
 
 - Logging now passes through all queued messages; routine info/debug call sites were reduced in the service and API layers: `src/services/system/logging.py`
-- Docs drift vs implementation (example response shapes and architecture claims): `docs/API.md`, `README.md`
-- Temporary CRUD file in tracked source path: `src/models/crud/system/persistent_logs_crud.py.temp`
+- Docs drift vs implementation (example response shapes and architecture claims): `docs/API.md`, `README.md`, `docs/DB.md`
 
 ---
 
