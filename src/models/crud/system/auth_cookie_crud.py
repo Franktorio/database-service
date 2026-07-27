@@ -25,7 +25,6 @@ async def _invalidate_after_update_auth_cookie(result, *args, **kwargs) -> None:
     if isinstance(old_token_hash, str):
         await invalidate_cookie_cache(old_token_hash)
     await invalidate_cookie_cache(result.token_hash)
-    await invalidate_user_permission_cache(result.username)
 
 
 @cache_invalidating(_invalidate_after_update_auth_cookie)
@@ -39,7 +38,6 @@ async def add_auth_cookie(
     """Add a cookie JWT tracking row."""
     auth_cookie = AuthCookie(
         token_hash=token_hash,
-        username=user.username,
         user_id=user.id,
         expires_at=expires_at,
     )
@@ -85,7 +83,6 @@ async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = Non
     row.revoked = True
     await session.commit()
     await invalidate_cookie_cache(token_hash)
-    await invalidate_user_permission_cache(row.username)
 
     return True
 
@@ -122,11 +119,11 @@ async def revoke_expired_auth_cookies(
 ) -> int:
     """Mark expired cookie JWT tracking rows as revoked."""
     check_time = now or datetime.now(timezone.utc)
-    stale_stmt = select(AuthCookie.token_hash, AuthCookie.username).where(
+    stale_stmt = select(AuthCookie.token_hash).where(
         AuthCookie.expires_at <= check_time, AuthCookie.revoked.is_(False)
     )
     stale_result = await session.execute(stale_stmt)
-    stale_rows = stale_result.all()
+    stale_token_hashes = [row[0] for row in stale_result.all()]
 
     stmt = (
         update(AuthCookie)
@@ -136,9 +133,8 @@ async def revoke_expired_auth_cookies(
     result = await session.execute(stmt)
     await session.commit()
     revoked = result.rowcount or 0
-    for token_hash, username in stale_rows:
+    for token_hash in stale_token_hashes:
         await invalidate_cookie_cache(token_hash)
-        await invalidate_user_permission_cache(username)
 
     return revoked
 
@@ -150,17 +146,16 @@ async def delete_expired_auth_cookies(
 ) -> int:
     """Delete expired cookie JWT tracking rows."""
     check_time = now or datetime.now(timezone.utc)
-    stale_stmt = select(AuthCookie.token_hash, AuthCookie.username).where(AuthCookie.expires_at <= check_time)
+    stale_stmt = select(AuthCookie.token_hash).where(AuthCookie.expires_at <= check_time)
     stale_result = await session.execute(stale_stmt)
-    stale_rows = stale_result.all()
+    stale_token_hashes = [row[0] for row in stale_result.all()]
 
     stmt = delete(AuthCookie).where(AuthCookie.expires_at <= check_time)
     result = await session.execute(stmt)
     await session.commit()
     deleted = result.rowcount or 0
-    for token_hash, username in stale_rows:
+    for token_hash in stale_token_hashes:
         await invalidate_cookie_cache(token_hash)
-        await invalidate_user_permission_cache(username)
 
     return deleted
 
@@ -168,11 +163,13 @@ async def delete_expired_auth_cookies(
 @with_session
 async def delete_auth_cookies_by_username(username: str, session: AsyncSession | None = None) -> int:
     """Delete all auth cookies for a specific user. Used in user updates and deletions coupled in the same session."""
-    stale_stmt = select(AuthCookie.token_hash).where(AuthCookie.username == username)
+    user_id_subquery = select(User.id).where(User.username == username)
+
+    stale_stmt = select(AuthCookie.token_hash).where(AuthCookie.user_id.in_(user_id_subquery))
     stale_result = await session.execute(stale_stmt)
     token_hashes = [row[0] for row in stale_result.all()]
 
-    stmt = delete(AuthCookie).where(AuthCookie.username == username)
+    stmt = delete(AuthCookie).where(AuthCookie.user_id.in_(user_id_subquery))
     result = await session.execute(stmt)
     await session.commit()
     deleted = result.rowcount or 0

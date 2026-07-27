@@ -111,8 +111,7 @@ Tracks issued JWT cookie sessions so they can be revoked server-side even though
 |---|---|---|---|
 | `id` | `Integer` | PK, auto | |
 | `token_hash` | `String` | `NOT NULL`, **unique** | `sha256(f"{API_KEY_PEPPER}:{jwt})` (same hashing helper as API keys) |
-| `username` | `String` | `NOT NULL`, FK → `users.username` **(`ON DELETE CASCADE`)**, indexed | |
-| `user_id` | `Integer` | `NOT NULL`, FK → `users.id` **(`ON DELETE CASCADE`)**, indexed | denormalized alongside `username` for query convenience |
+| `user_id` | `Integer` | `NOT NULL`, FK → `users.id` **(`ON DELETE CASCADE`)**, indexed | single source of truth for "which user" — a previously-denormalized `username` FK was dropped (see [Engineering Report §3](ENGINEERING_REPORT.md#3-database-design)); resolve the username via `get_user_by_id()` in `user_crud.py` when needed |
 | `expires_at` | `DateTime(timezone=True)` | `NOT NULL` | mirrors the JWT's own `exp` claim |
 | `revoked` | `Boolean` | `NOT NULL`, default `False` | set on logout/password-change/role-change/explicit revoke |
 | `created_at` | `DateTime(timezone=True)` | `NOT NULL`, `server_default=now()` | |
@@ -155,7 +154,6 @@ erDiagram
     AUTH_COOKIES {
         int id PK
         string token_hash UK
-        string username FK
         int user_id FK
         datetime expires_at
         bool revoked

@@ -82,6 +82,18 @@ async def get_user_by_username(username: str, session: AsyncSession | None = Non
     return user
 
 
+@with_session
+async def get_user_by_id(user_id: int, session: AsyncSession | None = None) -> User | None:
+    """Fetch a user by their ID."""
+    stmt = select(User).where(User.id == user_id)
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+    if user is None:
+        log_message(f"[WARNING] [{PRINT_PREFIX}] User not found for id: {user_id}.")
+
+    return user
+
+
 @audit_logged("user.update")
 @cache_invalidating(_invalidate_after_user_write)
 @with_session

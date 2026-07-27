@@ -10,7 +10,7 @@ from src.services.system.logging import log_message_for_ip
 from src.models.crud.audit_context import set_audit_actor
 from src.models.crud.cache_invalidation import cookie_identifier, user_identifier
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
-from src.models.crud.system.user_crud import get_user_by_username
+from src.models.crud.system.user_crud import get_user_by_id, get_user_by_username
 from src.security.extract import extract_client_ip, extract_cookie_value
 from src.security.tokens import decode_jwt_token, hash_token
 
@@ -61,8 +61,12 @@ async def _resolve_cookie_row(token_hash: str):
     if cookie_row is None:
         return None
 
+    user = await get_user_by_id(cookie_row.user_id)
+    if user is None:
+        return None
+
     payload = {
-        "username": cookie_row.username,
+        "username": user.username,
         "user_id": cookie_row.user_id,
         "revoked": cookie_row.revoked,
         "expires_at": cookie_row.expires_at.isoformat() if cookie_row.expires_at else None,

@@ -16,11 +16,6 @@ class AuthCookie(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, init=False)
     token_hash: Mapped[str] = mapped_column(nullable=False, unique=True)
-    username: Mapped[str] = mapped_column(
-        ForeignKey("users.username", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
