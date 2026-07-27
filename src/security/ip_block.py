@@ -17,6 +17,7 @@ from config.loader import (
     TRUSTED_PROXIES,
 )
 from src.security.extract import extract_client_ip, extract_request_from_call
+from src.models.crud.cache_invalidation import ip_block_identifier
 from src.services.system.cache.ratelimitcache import (
     ALLOWED,
     DENIED,
@@ -32,9 +33,6 @@ from src.services.system.logging import log_message_for_ip
 
 PRINT_PREFIX = "IP BLOCK"
 
-
-def _ip_ratelimit_identifier(ip_address: str) -> str:
-    return f"ip_block:{ip_address}"
 
 def with_ip_block(func):
     """Decorator that temporarily blocks abusive IPs using ratelimit-style tracking."""
@@ -52,7 +50,7 @@ def with_ip_block(func):
         blocked_retry_after: float | None = None
         newly_blocked = False
 
-        blocked_until = await RedisClient.get(f"ip_block:{ip_address}")
+        blocked_until = await RedisClient.get(ip_block_identifier(ip_address))
         if blocked_until is not None:
             try:
                 blocked_until_time = float(blocked_until)
@@ -65,14 +63,14 @@ def with_ip_block(func):
             
         if blocked_retry_after is None:
             try:
-                result = await process_request(_ip_ratelimit_identifier(ip_address))
+                result = await process_request(ip_block_identifier(ip_address))
                 if result in (NOT_FOUND, INVALID_DATA):
                     await place_in_redis(
-                        _ip_ratelimit_identifier(ip_address),
+                        ip_block_identifier(ip_address),
                         limit=IP_BLOCKING_THRESHOLD,
                         window=IP_BLOCKING_TIME_WINDOW,
                     )
-                    result = await process_request(_ip_ratelimit_identifier(ip_address))
+                    result = await process_request(ip_block_identifier(ip_address))
             except RateLimitServiceUnavailable:
                 log_message_for_ip(ip_address, "IP block rate limiter unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
                 raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
@@ -81,7 +79,7 @@ def with_ip_block(func):
                 newly_blocked = True
                 blocked_retry_after = float(IP_BLOCKING_DURATION)
                 await RedisClient.set(
-                    f"ip_block:{ip_address}",
+                    ip_block_identifier(ip_address),
                     f"{time.time() + IP_BLOCKING_DURATION}",
                     ex=REDIS_IP_BLOCK_EX_SECONDS,
                 )

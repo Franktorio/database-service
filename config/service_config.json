@@ -29,21 +29,17 @@
         "command_subprocess_timeout_seconds": 60,
         "probe_subprocess_timeout_seconds": 60
     },
-    "ratelimit_cache":
-    {
-        "enabled": true,
-        "sweep_interval": 60,
-        "max_inactive_seconds": 900
-    },
     "cookie_expiry":
     {
         "enabled": true,
         "sweep_interval": 60
     },
-    "ip_block_cache":
+    "redis_index_prefixes":
     {
-        "enabled": true,
-        "sweep_interval": 60,
-        "max_inactive_seconds": 900
+        "api_key": "api_key:",
+        "cookie": "cookie:",
+        "user": "user:",
+        "password": "password:",
+        "ip_block": "ip_block:"
     }
 }

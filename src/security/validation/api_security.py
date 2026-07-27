@@ -6,6 +6,7 @@ from config.loader import RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import PERM_LEVEL_MAP
 from src.api.models import APIRequestData
 from src.services.system.logging import log_message_for_ip
+from src.models.crud.cache_invalidation import api_key_identifier
 from src.models.crud.system.api_key_crud import get_api_key
 from src.models.tables.system.api_key_table import ApiKey
 from src.security.extract import extract_bearer_token, extract_client_ip, extract_request_from_call
@@ -28,13 +29,6 @@ from src.services.system.cache.redis.client import PermissionServiceUnavailable,
 
 PRINT_PREFIX = "API AUTH"
 
-def _ratelimit_identifier(key_hash: str) -> str:
-    return f"api_key:{key_hash}"
-
-
-def _permission_identifier(key_hash: str) -> str:
-    return f"api_key:{key_hash}"
-
 
 def _to_permission_payload(api_key: ApiKey) -> dict:
     return {
@@ -45,7 +39,7 @@ def _to_permission_payload(api_key: ApiKey) -> dict:
     }
 
 async def _get_api_permission_payload(key_hash: str) -> dict | None:
-    cached = await get_cached_permission_json(_permission_identifier(key_hash))
+    cached = await get_cached_permission_json(api_key_identifier(key_hash))
     if cached is not None:
         return cached
 
@@ -54,7 +48,7 @@ async def _get_api_permission_payload(key_hash: str) -> dict | None:
         return None
 
     payload = _to_permission_payload(api_key)
-    await cache_permission_json(_permission_identifier(key_hash), payload)
+    await cache_permission_json(api_key_identifier(key_hash), payload)
     return payload
 
 
@@ -64,7 +58,7 @@ async def _check_ratelimit(
     window_seconds: int,
     too_soon_window_seconds: int | None,
 ) -> tuple[bool, float]:
-    identifier = _ratelimit_identifier(key_hash)
+    identifier = api_key_identifier(key_hash)
     result = await process_request(identifier, too_soon_window_seconds)
     if result in (NOT_FOUND, INVALID_DATA):
         await place_in_redis(identifier, limit=rate_limit, window=window_seconds)

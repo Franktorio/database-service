@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
 from src.services.system.logging import log_message_for_ip
+from src.models.crud.cache_invalidation import password_identifier, user_identifier
 from src.models.crud.system.user_crud import get_user_by_username
 from src.security.tokens import create_cookie_token
 from src.security.tokens import verify_password
@@ -24,16 +25,8 @@ from src.services.system.cache.ratelimitcache import (
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
 
 
-def _password_ratelimit_identifier(username: str) -> str:
-    return f"password:{username}"
-
-
-def _user_permission_identifier(username: str) -> str:
-    return f"user:{username}"
-
-
 async def _get_user_permission_payload(username: str) -> dict:
-    cached = await get_cached_permission_json(_user_permission_identifier(username))
+    cached = await get_cached_permission_json(user_identifier(username))
     if cached is not None:
         return cached
 
@@ -52,12 +45,12 @@ async def _get_user_permission_payload(username: str) -> dict:
         "role": user.role,
         "login_rate_limit": user.login_rate_limit,
     }
-    await cache_permission_json(_user_permission_identifier(username), payload)
+    await cache_permission_json(user_identifier(username), payload)
     return payload
 
 
 async def _enforce_password_ratelimit(username: str, configured_limit: int) -> tuple[bool, float]:
-    identifier = _password_ratelimit_identifier(username)
+    identifier = password_identifier(username)
     result = await process_request(identifier)
     if result in (NOT_FOUND, INVALID_DATA):
         await place_in_redis(

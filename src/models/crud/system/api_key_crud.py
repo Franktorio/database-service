@@ -2,37 +2,27 @@
 
 from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from functools import wraps
 from src.models.database import with_session
+from src.models.crud.cache_invalidation import cache_invalidating, invalidate_api_key_cache
 from src.models.tables.system.api_key_table import ApiKey
-from src.services.system.cache.permissionscache import remove_cached_permission_json
-from src.services.system.cache.ratelimitcache import remove_from_redis
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "API KEY CRUD"
 
 
-async def _invalidate_api_key_cache(key_hash: str) -> None:
-    await remove_from_redis(f"api_key:{key_hash}")
-    await remove_cached_permission_json(f"api_key:{key_hash}")
-    
-def cache_invalidating(func):
-    """Decorator to invalidate cache after API key operations."""
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        result = await func(*args, **kwargs)
-        if isinstance(result, ApiKey):
-            await _invalidate_api_key_cache(result.key_hash)
-        elif result is True:
-            key_hash = kwargs.get("key_hash")
-            if key_hash is None and args:
-                key_hash = args[0]
-            if isinstance(key_hash, str):
-                await _invalidate_api_key_cache(key_hash)
-        return result
-    return wrapper
+async def _invalidate_after_api_key_write(result, *args, **kwargs) -> None:
+    """Shared invalidator for API key CRUD writes; see cache_invalidation.cache_invalidating."""
+    if isinstance(result, ApiKey):
+        await invalidate_api_key_cache(result.key_hash)
+    elif result is True:
+        key_hash = kwargs.get("key_hash")
+        if key_hash is None and args:
+            key_hash = args[0]
+        if isinstance(key_hash, str):
+            await invalidate_api_key_cache(key_hash)
 
-@cache_invalidating
+
+@cache_invalidating(_invalidate_after_api_key_write)
 @with_session
 async def add_api_key(
     key_hash: str,
@@ -70,7 +60,7 @@ async def get_api_keys(session: AsyncSession | None = None) -> list[ApiKey]:
 
     return api_keys
 
-@cache_invalidating
+@cache_invalidating(_invalidate_after_api_key_write)
 @with_session
 async def delete_api_key(key_hash: str, session: AsyncSession | None = None) -> bool:
     """Delete an API key by its hash."""
@@ -84,7 +74,7 @@ async def delete_api_key(key_hash: str, session: AsyncSession | None = None) -> 
     return deleted
 
 
-@cache_invalidating
+@cache_invalidating(_invalidate_after_api_key_write)
 @with_session
 async def update_api_key(
     key_hash: str,

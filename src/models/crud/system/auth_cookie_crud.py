@@ -1,43 +1,25 @@
 from datetime import datetime, timezone
-from functools import wraps
 
 from sqlalchemy import delete, select, update
 
 from src.models.database import with_session
 from sqlalchemy.ext.asyncio import AsyncSession
+from src.models.crud.cache_invalidation import (
+    cache_invalidating,
+    invalidate_cookie_cache,
+    invalidate_user_permission_cache,
+)
 from src.models.tables.system.auth_cookie_table import AuthCookie
 from src.models.tables.system.user_table import User
-from src.services.system.cache.permissionscache import remove_cached_permission_json
-from src.services.system.cache.ratelimitcache import remove_from_redis
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "AUTH COOKIE CRUD"
 
 
-async def _invalidate_cookie_cache(token_hash: str) -> None:
-    await remove_from_redis(f"cookie:{token_hash}")
-
-
-async def _invalidate_user_permission_cache(username: str) -> None:
-    await remove_cached_permission_json(f"user:{username}")
-
-
-def cache_invalidating(invalidator):
-    """Decorator factory to invalidate auth cookie caches after write operations."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            result = await func(*args, **kwargs)
-            await invalidator(result, *args, **kwargs)
-            return result
-        return wrapper
-    return decorator
-
-
 async def _invalidate_after_add_auth_cookie(result, *args, **kwargs) -> None:
     if isinstance(result, AuthCookie):
-        await _invalidate_cookie_cache(result.token_hash)
-        await _invalidate_user_permission_cache(result.username)
+        await invalidate_cookie_cache(result.token_hash)
+        await invalidate_user_permission_cache(result.username)
 
 
 async def _invalidate_after_refresh_auth_cookie(result, *args, **kwargs) -> None:
@@ -47,9 +29,9 @@ async def _invalidate_after_refresh_auth_cookie(result, *args, **kwargs) -> None
     if old_token_hash is None and args:
         old_token_hash = args[0]
     if isinstance(old_token_hash, str):
-        await _invalidate_cookie_cache(old_token_hash)
-    await _invalidate_cookie_cache(result.token_hash)
-    await _invalidate_user_permission_cache(result.username)
+        await invalidate_cookie_cache(old_token_hash)
+    await invalidate_cookie_cache(result.token_hash)
+    await invalidate_user_permission_cache(result.username)
 
 
 @cache_invalidating(_invalidate_after_add_auth_cookie)
@@ -108,8 +90,8 @@ async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = Non
 
     row.revoked = True
     await session.commit()
-    await _invalidate_cookie_cache(token_hash)
-    await _invalidate_user_permission_cache(row.username)
+    await invalidate_cookie_cache(token_hash)
+    await invalidate_user_permission_cache(row.username)
 
     return True
 
@@ -174,8 +156,8 @@ async def delete_expired_auth_cookies(
     await session.commit()
     deleted = result.rowcount or 0
     for token_hash, username in stale_rows:
-        await _invalidate_cookie_cache(token_hash)
-        await _invalidate_user_permission_cache(username)
+        await invalidate_cookie_cache(token_hash)
+        await invalidate_user_permission_cache(username)
 
     return deleted
 
@@ -192,7 +174,7 @@ async def delete_auth_cookies_by_username(username: str, session: AsyncSession |
     await session.commit()
     deleted = result.rowcount or 0
     for token_hash in token_hashes:
-        await _invalidate_cookie_cache(token_hash)
-    await _invalidate_user_permission_cache(username)
+        await invalidate_cookie_cache(token_hash)
+    await invalidate_user_permission_cache(username)
 
     return deleted

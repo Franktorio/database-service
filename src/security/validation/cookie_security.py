@@ -10,6 +10,7 @@ from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
 from src.api.models import CookieRequestData
 from src.services.system.logging import log_message_for_ip
+from src.models.crud.cache_invalidation import cookie_identifier, user_identifier
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.models.crud.system.user_crud import get_user_by_username
 from src.security.extract import extract_client_ip, extract_cookie_value
@@ -32,14 +33,8 @@ from src.services.system.cache.ratelimitcache import (
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
 
 
-def _cookie_ratelimit_identifier(token_hash: str) -> str:
-    return f"cookie:{token_hash}"
-
-def _user_permission_identifier(username: str) -> str:
-    return f"user:{username}"
-
 async def _resolve_user_permissions(username: str) -> dict | None:
-    cached = await get_cached_permission_json(_user_permission_identifier(username))
+    cached = await get_cached_permission_json(user_identifier(username))
     if cached is not None:
         return cached
 
@@ -53,12 +48,12 @@ async def _resolve_user_permissions(username: str) -> dict | None:
         "role": user.role,
         "login_rate_limit": user.login_rate_limit,
     }
-    await cache_permission_json(_user_permission_identifier(username), payload)
+    await cache_permission_json(user_identifier(username), payload)
     return payload
 
 
 async def _ensure_cookie_ratelimit(token_hash: str) -> tuple[bool, float]:
-    identifier = _cookie_ratelimit_identifier(token_hash)
+    identifier = cookie_identifier(token_hash)
     result = await process_request(identifier)
     if result in (NOT_FOUND, INVALID_DATA):
         await place_in_redis(
