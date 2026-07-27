@@ -1,19 +1,14 @@
 import asyncio
-import json
 
-from config.loader import PROJECT_ROOT
+from config.settings import COOKIE_EXPIRY_SETTINGS
 from src.models.crud.system.auth_cookie_crud import revoke_expired_auth_cookies
 from src.models.database import SessionLocal
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "COOKIE EXPIRY SERVICE"
 
-LOCALCONFIG = json.loads(
-    (PROJECT_ROOT / "config" / "service_config.json").read_text()
-).get("cookie_expiry", {})
-
-COOKIE_EXPIRY_SERVICE_ENABLED = LOCALCONFIG.get("enabled", True)
-COOKIE_EXPIRY_SWEEP_INTERVAL = LOCALCONFIG.get("sweep_interval", 60)
+COOKIE_EXPIRY_SERVICE_ENABLED = COOKIE_EXPIRY_SETTINGS.enabled
+COOKIE_EXPIRY_SWEEP_INTERVAL = COOKIE_EXPIRY_SETTINGS.sweep_interval
 
 
 async def _revoke_expired_auth_cookies_with_service_session() -> int:

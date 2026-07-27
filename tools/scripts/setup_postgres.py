@@ -1,7 +1,6 @@
 # ~/tools/scripts/setup_postgres.py
 
 import pathlib
-import json
 import re
 import shutil
 import subprocess
@@ -11,18 +10,15 @@ from config.loader import (
 	POSTGRESQL_PASSWORD,
 	POSTGRESQL_PORT,
 	POSTGRESQL_USERNAME,
-	PROJECT_ROOT,
 )
+from config.settings import SETUP_POSTGRES_SETTINGS
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "SETUP POSTGRES SCRIPT"
 
 
-_SETUP_CONFIG = json.loads(
-	(PROJECT_ROOT / "config" / "service_config.json").read_text()
-).get("setup_postgres", {})
-COMMAND_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get("command_subprocess_timeout_seconds", 60)
-PROBE_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get("probe_subprocess_timeout_seconds", 60)
+COMMAND_SUBPROCESS_TIMEOUT_SECONDS = SETUP_POSTGRES_SETTINGS.command_subprocess_timeout_seconds
+PROBE_SUBPROCESS_TIMEOUT_SECONDS = SETUP_POSTGRES_SETTINGS.probe_subprocess_timeout_seconds
 
 # USAGE (on project root): python3 -m tools.scripts.setup_postgres
 

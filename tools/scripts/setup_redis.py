@@ -2,32 +2,21 @@
 # This script is intended to be run in a Debian/Ubuntu environment with apt and systemd.
 # It sets up a Redis server with the specified configuration.
 
-import json
 import subprocess
 
 from config.loader import (
     REDIS_HOST,
     REDIS_PORT,
     REDIS_PASSWORD,
-    PROJECT_ROOT,
 )
+from config.settings import SETUP_REDIS_SETTINGS
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "SETUP REDIS SCRIPT"
 
-_SETUP_CONFIG = json.loads(
-	(PROJECT_ROOT / "config" / "service_config.json").read_text()
-).get("setup_redis", {})
+COMMAND_SUBPROCESS_TIMEOUT_SECONDS = SETUP_REDIS_SETTINGS.command_subprocess_timeout_seconds
 
-COMMAND_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get(
-    "command_subprocess_timeout_seconds",
-    60,
-)
-
-PROBE_SUBPROCESS_TIMEOUT_SECONDS = _SETUP_CONFIG.get(
-    "probe_subprocess_timeout_seconds",
-    30,
-)
+PROBE_SUBPROCESS_TIMEOUT_SECONDS = SETUP_REDIS_SETTINGS.probe_subprocess_timeout_seconds
 
 REDIS_CONF_PATH = "/etc/redis/redis.conf"
 PORT_LINE_PATTERN = r"^[[:space:]]*#?[[:space:]]*port[[:space:]]*="

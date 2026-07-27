@@ -1,7 +1,6 @@
 # ~/src/services/backup.py
 
 import asyncio
-import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -13,22 +12,18 @@ from config.loader import (
     POSTGRESQL_HOST,
     POSTGRESQL_PORT,
 )
+from config.settings import BACKUP_SETTINGS
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "BACKUP"
 
-LOCALCONFIG = json.loads(
-    (PROJECT_ROOT / "config" / "service_config.json").read_text()
-)["backup"]
-
-
-INTERVAL = LOCALCONFIG.get("interval", 3600)
-RETENTION = LOCALCONFIG.get("retention", 7)
-BACKUP_ENABLED = LOCALCONFIG.get("enabled", True)
-BACKUP_DIR = Path(LOCALCONFIG.get("backup_dir", "backups"))
+INTERVAL = BACKUP_SETTINGS.interval
+RETENTION = BACKUP_SETTINGS.retention
+BACKUP_ENABLED = BACKUP_SETTINGS.enabled
+BACKUP_DIR = Path(BACKUP_SETTINGS.backup_dir)
 if not BACKUP_DIR.is_absolute():
     BACKUP_DIR = PROJECT_ROOT / BACKUP_DIR
-SUBPROCESS_TIMEOUT_SECONDS = LOCALCONFIG.get("subprocess_timeout_seconds", 30)
+SUBPROCESS_TIMEOUT_SECONDS = BACKUP_SETTINGS.subprocess_timeout_seconds
 
 
 def _get_last_backup():

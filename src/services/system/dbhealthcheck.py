@@ -4,7 +4,6 @@ import signal
 import subprocess
 import asyncio
 import time
-import json
 from pathlib import Path
 from config.loader import (
     PROJECT_ROOT,
@@ -14,6 +13,7 @@ from config.loader import (
     POSTGRESQL_HOST,
     POSTGRESQL_PORT,
 )
+from config.settings import DBHEALTHCHECKER_SETTINGS
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from src.models.database import SessionLocal
@@ -21,20 +21,16 @@ from src.services.system.logging import log_message
 
 PRINT_PREFIX = "DBHEALTHCHECK"
 
-LOCALCONFIG = json.loads(
-    (PROJECT_ROOT / "config" / "service_config.json").read_text()
-)["dbhealthchecker"]
-
-HEALTHCHECK_ENABLED = LOCALCONFIG.get("enabled", True)
-AUTO_ROLLOVER = LOCALCONFIG.get("auto_rollover", False)
-SHUTDOWN_ON_FAILURE = LOCALCONFIG.get("shutdown_on_failure", True)
-LENIENCY = LOCALCONFIG.get("leniency", 5)
-INTERVAL = LOCALCONFIG.get("interval", 60)
-REPARATIONS_INTERVAL = LOCALCONFIG.get("reparations_interval", 5) # if auto_rollover is enabled, this is the interval to wait before attempting to restore from backup
-HEALTHCHECK_TIMEOUT_SECONDS = LOCALCONFIG.get("healthcheck_timeout_seconds", 30)
-RESTORE_SUBPROCESS_TIMEOUT_SECONDS = LOCALCONFIG.get("restore_subprocess_timeout_seconds", 30)
-MAX_RESTORE_ATTEMPTS = LOCALCONFIG.get("max_restore_attempts", 3)
-BACKUP_DIR = Path(LOCALCONFIG.get("backup_dir", "backups"))
+HEALTHCHECK_ENABLED = DBHEALTHCHECKER_SETTINGS.enabled
+AUTO_ROLLOVER = DBHEALTHCHECKER_SETTINGS.auto_rollover
+SHUTDOWN_ON_FAILURE = DBHEALTHCHECKER_SETTINGS.shutdown_on_failure
+LENIENCY = DBHEALTHCHECKER_SETTINGS.leniency
+INTERVAL = DBHEALTHCHECKER_SETTINGS.interval
+REPARATIONS_INTERVAL = DBHEALTHCHECKER_SETTINGS.reparations_interval # if auto_rollover is enabled, this is the interval to wait before attempting to restore from backup
+HEALTHCHECK_TIMEOUT_SECONDS = DBHEALTHCHECKER_SETTINGS.healthcheck_timeout_seconds
+RESTORE_SUBPROCESS_TIMEOUT_SECONDS = DBHEALTHCHECKER_SETTINGS.restore_subprocess_timeout_seconds
+MAX_RESTORE_ATTEMPTS = DBHEALTHCHECKER_SETTINGS.max_restore_attempts
+BACKUP_DIR = Path(DBHEALTHCHECKER_SETTINGS.backup_dir)
 if not BACKUP_DIR.is_absolute():
     BACKUP_DIR = PROJECT_ROOT / BACKUP_DIR
 

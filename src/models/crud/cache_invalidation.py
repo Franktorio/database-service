@@ -2,28 +2,23 @@
 # Shared write-path cache invalidation helpers for the CRUD layer.
 #
 # Redis key prefixes are sourced from config/service_config.json:redis_index_prefixes
-# so the domain prefixes used to build cache identifiers live in one
-# configurable place rather than being hardcoded as string literals in every
-# CRUD file.
+# (validated via config/settings.py:RedisIndexPrefixes) so the domain prefixes
+# used to build cache identifiers live in one configurable place rather than
+# being hardcoded as string literals in every CRUD file.
 
-import json
 from functools import wraps
 
-from config.loader import PROJECT_ROOT
+from config.settings import REDIS_INDEX_PREFIXES
 from src.services.system.cache.permissionscache import remove_cached_permission_json
 from src.services.system.cache.ratelimitcache import remove_from_redis
 
 PRINT_PREFIX = "CACHE INVALIDATION"
 
-_LOCALCONFIG = json.loads(
-    (PROJECT_ROOT / "config" / "service_config.json").read_text()
-).get("redis_index_prefixes", {})
-
-API_KEY_PREFIX: str = _LOCALCONFIG.get("api_key", "api_key:")
-COOKIE_PREFIX: str = _LOCALCONFIG.get("cookie", "cookie:")
-USER_PREFIX: str = _LOCALCONFIG.get("user", "user:")
-PASSWORD_PREFIX: str = _LOCALCONFIG.get("password", "password:")
-IP_BLOCK_PREFIX: str = _LOCALCONFIG.get("ip_block", "ip_block:")
+API_KEY_PREFIX: str = REDIS_INDEX_PREFIXES.api_key
+COOKIE_PREFIX: str = REDIS_INDEX_PREFIXES.cookie
+USER_PREFIX: str = REDIS_INDEX_PREFIXES.user
+PASSWORD_PREFIX: str = REDIS_INDEX_PREFIXES.password
+IP_BLOCK_PREFIX: str = REDIS_INDEX_PREFIXES.ip_block
 
 
 def user_identifier(username: str) -> str:
