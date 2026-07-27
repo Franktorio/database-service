@@ -1,13 +1,7 @@
 # ~/config/settings.py
 # Typed, validated configuration for the tunable operational knobs in
 # config/service_config.json.
-#
-# This replaces the pattern where each module (backup.py, dbhealthcheck.py,
-# cookieexpiry.py, setup_postgres.py, setup_redis.py, cache_invalidation.py)
-# independently ran json.loads(Path(...).read_text()) and pulled values out
-# with untyped .get(...) calls. The JSON file is now read and validated
-# exactly once, here, into one Pydantic model per top-level section. Every
-# other module imports its settings instance from this file instead.
+
 
 import json
 

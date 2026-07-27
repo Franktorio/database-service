@@ -16,13 +16,7 @@ from src.services.system.logging import log_message
 PRINT_PREFIX = "AUTH COOKIE CRUD"
 
 
-async def _invalidate_after_add_auth_cookie(result, *args, **kwargs) -> None:
-    if isinstance(result, AuthCookie):
-        await invalidate_cookie_cache(result.token_hash)
-        await invalidate_user_permission_cache(result.username)
-
-
-async def _invalidate_after_refresh_auth_cookie(result, *args, **kwargs) -> None:
+async def _invalidate_after_update_auth_cookie(result, *args, **kwargs) -> None:
     if not isinstance(result, AuthCookie):
         return
     old_token_hash = kwargs.get("token_hash")
@@ -34,7 +28,7 @@ async def _invalidate_after_refresh_auth_cookie(result, *args, **kwargs) -> None
     await invalidate_user_permission_cache(result.username)
 
 
-@cache_invalidating(_invalidate_after_add_auth_cookie)
+@cache_invalidating(_invalidate_after_update_auth_cookie)
 @with_session
 async def add_auth_cookie(
     token_hash: str,
@@ -96,7 +90,7 @@ async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = Non
     return True
 
 
-@cache_invalidating(_invalidate_after_refresh_auth_cookie)
+@cache_invalidating(_invalidate_after_update_auth_cookie)
 @with_session
 async def refresh_auth_cookie(
     token_hash: str,
@@ -128,6 +122,12 @@ async def revoke_expired_auth_cookies(
 ) -> int:
     """Mark expired cookie JWT tracking rows as revoked."""
     check_time = now or datetime.now(timezone.utc)
+    stale_stmt = select(AuthCookie.token_hash, AuthCookie.username).where(
+        AuthCookie.expires_at <= check_time, AuthCookie.revoked.is_(False)
+    )
+    stale_result = await session.execute(stale_stmt)
+    stale_rows = stale_result.all()
+
     stmt = (
         update(AuthCookie)
         .where(AuthCookie.expires_at <= check_time, AuthCookie.revoked.is_(False))
@@ -136,6 +136,9 @@ async def revoke_expired_auth_cookies(
     result = await session.execute(stmt)
     await session.commit()
     revoked = result.rowcount or 0
+    for token_hash, username in stale_rows:
+        await invalidate_cookie_cache(token_hash)
+        await invalidate_user_permission_cache(username)
 
     return revoked
 

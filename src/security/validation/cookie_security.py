@@ -15,7 +15,6 @@ from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.models.crud.system.user_crud import get_user_by_username
 from src.security.extract import extract_client_ip, extract_cookie_value
 from src.security.tokens import decode_jwt_token, hash_token
-from src.services.system.logging import log_message
 
 from src.services.system.cache.permissionscache import (
     cache_permission_json,
@@ -49,6 +48,25 @@ async def _resolve_user_permissions(username: str) -> dict | None:
         "login_rate_limit": user.login_rate_limit,
     }
     await cache_permission_json(user_identifier(username), payload)
+    return payload
+
+
+async def _resolve_cookie_row(token_hash: str):
+    cached = await get_cached_permission_json(cookie_identifier(token_hash))
+    if cached is not None:
+        return cached
+
+    cookie_row = await get_auth_cookie_by_hash(token_hash)
+    if cookie_row is None:
+        return None
+
+    payload = {
+        "username": cookie_row.username,
+        "user_id": cookie_row.user_id,
+        "revoked": cookie_row.revoked,
+        "expires_at": cookie_row.expires_at.isoformat() if cookie_row.expires_at else None,
+    }
+    await cache_permission_json(cookie_identifier(token_hash), payload)
     return payload
 
 
@@ -126,7 +144,7 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     detail={"error": "Rate limit exceeded.", "retry_after": status},
                 )
 
-            cookie_row = await get_auth_cookie_by_hash(token_hash)
+            cookie_row = await _resolve_cookie_row(token_hash)
             if cookie_row is None:
                 log_message_for_ip(
                     client_ip,
@@ -137,7 +155,7 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token is not registered.")
-            if cookie_row.revoked:
+            if cookie_row["revoked"]:
                 log_message_for_ip(
                     client_ip,
                     f"Cookie authentication failed: revoked token hash={token_hash[:12]}",
@@ -147,7 +165,9 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token has been revoked.")
-            if cookie_row.expires_at <= datetime.now(timezone.utc):
+
+            cookie_expires_at = datetime.fromisoformat(cookie_row["expires_at"]) if cookie_row["expires_at"] else None
+            if cookie_expires_at is None or cookie_expires_at <= datetime.now(timezone.utc):
                 log_message_for_ip(
                     client_ip,
                     f"Cookie authentication failed: expired token hash={token_hash[:12]}",
@@ -158,14 +178,14 @@ def cookie_authentication(required_roles: set[str] | None = None, redirect_url: 
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Cookie token has expired.")
 
-            username = cookie_row.username
+            username = cookie_row["username"]
             if username != username_claim:
                 log_message_for_ip(client_ip, "Cookie authentication failed: username claim mismatch.", "COOKIE SECURITY", level="WARNING")
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)
                 raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
 
-            if user_id_claim is not None and cookie_row.user_id != user_id_claim:
+            if user_id_claim is not None and cookie_row["user_id"] != user_id_claim:
                 log_message_for_ip(client_ip, "Cookie authentication failed: user_id claim mismatch.", "COOKIE SECURITY", level="WARNING")
                 if redirect_url:
                     return RedirectResponse(url=redirect_url)

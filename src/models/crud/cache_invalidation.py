@@ -59,6 +59,11 @@ async def invalidate_api_key_ratelimit_cache(key_hash: str) -> None:
 async def invalidate_api_key_permission_cache(key_hash: str) -> None:
     """Invalidate only the cached API key permission payload."""
     await remove_cached_permission_json(api_key_identifier(key_hash))
+    
+
+async def invalidate_cookie_permission_cache(token_hash: str) -> None:
+    """Invalidate only the cached per-cookie permission payload."""
+    await remove_cached_permission_json(cookie_identifier(token_hash))
 
 
 async def invalidate_cookie_ratelimit_cache(token_hash: str) -> None:
@@ -84,8 +89,9 @@ async def invalidate_api_key_cache(key_hash: str) -> None:
 
 
 async def invalidate_cookie_cache(token_hash: str) -> None:
-    """Invalidate an auth cookie's cached rate-limit state."""
+    """Invalidate an auth cookie's cached rate-limit state and permission payload."""
     await invalidate_cookie_ratelimit_cache(token_hash)
+    await invalidate_cookie_permission_cache(token_hash)
 
 
 def cache_invalidating(invalidator):
