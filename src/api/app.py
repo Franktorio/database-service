@@ -3,7 +3,7 @@
 import asyncio
 import uvicorn
 import fastapi
-from fastapi import Request
+from fastapi import Depends, Request
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Any
@@ -18,12 +18,13 @@ from src.api.system.api_db_endpoints import routes as api_db_routes
 from src.api.system.user_db_endpoints import routes as user_db_routes
 from src.services.system.cache.redis.client import RedisClient
 
-from src.security.validation.api_security import api_authentication
+from src.security.validation.api_security import api_key_authorized_factory, to_api_request_data
 from src.security.ip_block import with_ip_block
 from src.security.validation.password_security import auth_and_grant_token
-from src.security.validation.cookie_security import cookie_authentication
+from src.security.validation.cookie_security import cookie_authorized_factory
 from src.security.tokens import get_cookie_settings
 from src.models.database import init_db, close_db
+from src.models.tables.system.api_key_table import ApiKey
 from src.services.supervisor import TaskSupervisor
 from src.services.system.cookieexpiry import (
     cookie_expiry_service_loop,
@@ -40,7 +41,7 @@ from src.services.system.dbhealthcheck import (
 
 from src.api.config import VIEW_LEVEL
 
-from src.api.models import LoginRequestBase
+from src.api.models import CookieRequestData, LoginRequestBase
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "API APP"
@@ -109,10 +110,9 @@ async def root(request: Request):
 
 @test_router.post("/api-auth-test")
 @with_ip_block
-@api_authentication(permission_level=VIEW_LEVEL)
-async def auth_test(request: Request):
+async def auth_test(request: Request, api_key: ApiKey = Depends(api_key_authorized_factory(VIEW_LEVEL))):
     return {
-        "message": f"API key is valid: {request.state.api_data}"
+        "message": f"API key is valid: {to_api_request_data(api_key)}"
     }
 
 @test_router.post("/login-auth-test")
@@ -132,8 +132,7 @@ async def login_test(login_request: LoginRequestBase, request: Request,):
 
 @test_router.post("/cookie-auth-test")
 @with_ip_block
-@cookie_authentication()
-async def cookie_test(request: Request):
+async def cookie_test(request: Request, cookie_data: CookieRequestData = Depends(cookie_authorized_factory())):
     response = JSONResponse(content={"message": "Cookie authentication successful."})
     return response
 

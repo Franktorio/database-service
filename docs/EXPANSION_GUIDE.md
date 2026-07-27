@@ -28,7 +28,7 @@ Worked example used throughout: a **`notes`** feature — users can create and r
 ## Ground rules
 
 1. **Never import from another feature's internals**, and never modify `src/**/system/**` to special-case your feature. If the system layer is genuinely missing a hook you need (e.g., a new decorator parameter), add it generically, not with an `if feature_name == "notes"` branch.
-2. **Reuse, don't reimplement**, the primitives that already exist: `with_ip_block`, `api_authentication`/`cookie_authentication`, the Redis rate-limit/permission cache helpers, `with_session`, `Base`. Every one of these is generic and takes parameters (permission level, cache identifiers, etc.) — you should never need to write a new rate limiter or a new password hasher for a typical feature.
+2. **Reuse, don't reimplement**, the primitives that already exist: `with_ip_block`, `api_key_authorized_factory`/`cookie_authorized_factory` (FastAPI `Depends()` dependencies), the Redis rate-limit/permission cache helpers, `with_session`, `Base`. Every one of these is generic and takes parameters (permission level, cache identifiers, etc.) — you should never need to write a new rate limiter or a new password hasher for a typical feature.
 3. **One CRUD module per table**, following the conventions in [`docs/DATABASE.md`](DATABASE.md#crud-layer-conventions) — no direct SQLAlchemy queries in route handlers.
 4. **Mirror the existing file layout** so the codebase stays predictable for the next contributor (see below).
 
@@ -204,27 +204,29 @@ router = APIRouter(prefix="/api/notes", tags=["notes"])
 `src/api/notes/routes/_post_routes.py`:
 
 ```python
-from fastapi import Request
+from fastapi import Depends, Request
 
 from src.api.notes.models import NoteCreateRequest, NoteResponse
 from src.api.notes.routes.router import router
 from src.api.config import EDIT_LEVEL
 from src.models.crud.notes.note_crud import add_note
+from src.models.tables.system.api_key_table import ApiKey
 from src.security.ip_block import with_ip_block
-from src.security.validation.api_security import api_authentication
+from src.security.validation.api_security import api_key_authorized_factory
+
+require_editor = api_key_authorized_factory(EDIT_LEVEL)
 
 
 @router.post("", response_model=NoteResponse)
 @with_ip_block
-@api_authentication(permission_level=EDIT_LEVEL)
-async def create_note(request: Request, model: NoteCreateRequest):
-    # request.state.api_data (an APIRequestData) is populated by api_authentication
-    # and is available here if you need the caller's permission level/fingerprint.
+async def create_note(request: Request, model: NoteCreateRequest, api_key: ApiKey = Depends(require_editor)):
+    # `api_key` (an ApiKey) is resolved by api_key_authorized_factory; request.state.api_data
+    # (an APIRequestData) is also populated if you need the caller's fingerprint/permission name.
     note = await add_note(username="api-key-owner", title=model.title, body=model.body)
     return NoteResponse(id=note.id, title=note.title, body=note.body)
 ```
 
-This reuses `with_ip_block` and `api_authentication` exactly as every existing `system` route does — just at a lower permission level (`EDIT_LEVEL = 1` instead of `SUPER_ADMIN_LEVEL`). **Decorator order matters**: `with_ip_block` must be the outermost of the two (closest to `@router.post`) so abusive IPs are rejected before any auth/DB work happens — copy this order exactly.
+This reuses `with_ip_block` and `api_key_authorized_factory` exactly as every existing `system` route does — just at a lower permission level (`EDIT_LEVEL = 1` instead of `SUPER_ADMIN_LEVEL`). `with_ip_block` stays a decorator (it must be the outermost wrapper, closest to `@router.post`, so abusive IPs are rejected before any auth/DB work happens — copy this order exactly); the auth check itself is now a normal `Depends(...)` parameter, so it shows up in the route's OpenAPI schema and there's no decorator-ordering footgun for it.
 
 `src/api/notes/routes/__init__.py` (side-effect imports so decorators register the routes on `router`):
 
@@ -263,7 +265,7 @@ The existing `system` routes hardcode `SUPER_ADMIN_LEVEL` because they *are* sys
 | `3` | `ADMIN_LEVEL` | Cross-user administrative actions within your feature |
 | `4` | `SUPER_ADMIN_LEVEL` | **Reserved for system administration** — do not gate feature routes behind this; it exists specifically so system routes stay separated from everything else. |
 
-If your feature needs more granular permissions than this flat 0–4 scale (e.g., per-resource ownership, team-based access), build that as **your own authorization check inside your route/CRUD layer**, layered *on top of* the existing `api_authentication`/`cookie_authentication` (which still gives you IP blocking, rate limiting, and "is this credential valid at all" for free) rather than replacing it.
+If your feature needs more granular permissions than this flat 0–4 scale (e.g., per-resource ownership, team-based access), build that as **your own authorization check inside your route/CRUD layer**, layered *on top of* the existing `api_key_authorized_factory`/`cookie_authorized_factory` dependencies (which still give you IP blocking, rate limiting, and "is this credential valid at all" for free) rather than replacing them.
 
 ## Reusing rate limiting for your own resources
 
@@ -288,16 +290,20 @@ This is the same atomic Lua-script-backed limiter used for login attempts, API k
 
 ## Adding user-facing (cookie) authentication
 
-The `cookie_authentication()` decorator (see [`src/security/validation/cookie_security.py`](../src/security/validation/cookie_security.py)) is fully generic and works today — it's just not exercised by any real (non-test) route yet. To use it for a feature route:
+The `cookie_authorized_factory()` dependency chain (see [`src/security/validation/cookie_security.py`](../src/security/validation/cookie_security.py)) is fully generic and works today — it's just not exercised by any real (non-test) route yet. To use it for a feature route:
 
 ```python
-from src.security.validation.cookie_security import cookie_authentication
+from fastapi import Depends
+
+from src.api.models import CookieRequestData
+from src.security.validation.cookie_security import cookie_authorized_factory
+
+require_cookie = cookie_authorized_factory()  # optionally: cookie_authorized_factory(required_roles={"admin"})
 
 @router.get("/my-notes")
 @with_ip_block
-@cookie_authentication()  # optionally: cookie_authentication(required_roles={"admin"})
-async def list_my_notes(request: Request):
-    username = request._cookie_data.username
+async def list_my_notes(request: Request, cookie_data: CookieRequestData = Depends(require_cookie)):
+    username = cookie_data.username
     ...
 ```
 

@@ -1,6 +1,5 @@
 
-from functools import wraps
-from fastapi import HTTPException
+from fastapi import HTTPException, Depends, Request
 
 from config.loader import RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import PERM_LEVEL_MAP
@@ -9,7 +8,7 @@ from src.services.system.logging import log_message_for_ip
 from src.models.crud.cache_invalidation import api_key_identifier
 from src.models.crud.system.api_key_crud import get_api_key
 from src.models.tables.system.api_key_table import ApiKey
-from src.security.extract import extract_bearer_token, extract_client_ip, extract_request_from_call
+from src.security.extract import extract_bearer_token, extract_client_ip
 from src.security.tokens import hash_token
 
 from src.services.system.cache.permissionscache import (
@@ -31,12 +30,34 @@ PRINT_PREFIX = "API AUTH"
 
 
 def _to_permission_payload(api_key: ApiKey) -> dict:
+    """Converts an ApiKey object to a dictionary payload for caching and validation."""
     return {
+        "key_hash": api_key.key_hash,
         "permission_level": api_key.permission_level,
         "rate_limit": api_key.rate_limit,
         "window_seconds": RATE_LIMIT_WINDOW_SECONDS,
         "email": api_key.email,
     }
+    
+def _to_api_key_object(payload: dict) -> ApiKey:
+    """Converts a dictionary payload back to an ApiKey object."""
+    return ApiKey(
+        key_hash=payload.get("key_hash", ""),
+        permission_level=payload.get("permission_level", 0),
+        rate_limit=payload.get("rate_limit", 1),
+        email=payload.get("email", ""),
+    )
+
+
+def to_api_request_data(api_key: ApiKey) -> APIRequestData:
+    """Converts a validated ApiKey into the request-scoped payload exposed to route handlers."""
+    return APIRequestData(
+        api_key_fingerprint=api_key.key_hash[:12],
+        permission_level=api_key.permission_level,
+        permission_name=PERM_LEVEL_MAP.get(api_key.permission_level, "Unknown"),
+        rate_limit=api_key.rate_limit,
+    )
+
 
 async def _get_api_permission_payload(key_hash: str) -> dict | None:
     cached = await get_cached_permission_json(api_key_identifier(key_hash))
@@ -74,65 +95,87 @@ async def _check_ratelimit(
     raise RuntimeError(f"Unexpected result from rate limit check: {result}")
 
 
-def api_authentication(permission_level: int, too_soon_window_seconds: int | None = None):
-    """Decorator to validate API key and enforce Redis-backed authorization flow."""
+def get_key_hash_from_request(request: Request) -> str | None:
+    """Extracts the API key from the request and returns its hashed value."""
+    api_key = extract_bearer_token(request)
+    if not api_key:
+        return None
+    return hash_token(api_key)
 
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            request = extract_request_from_call(args, kwargs)
+
+async def get_current_api_key(
+    request: Request,
+    key_hash: str | None = Depends(get_key_hash_from_request),
+) -> ApiKey:
+    """Dependency that resolves and validates the caller's API key (existence only; no rate/permission checks)."""
+    ip_address = extract_client_ip(request)
+    if not key_hash:
+        log_message_for_ip(ip_address, "Missing or invalid Authorization header.", PRINT_PREFIX, level="WARNING")
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header. Expected: Bearer <api_key>",
+        )
+
+    try:
+        permission_payload = await _get_api_permission_payload(key_hash)
+    except PermissionServiceUnavailable:
+        log_message_for_ip(ip_address, "Authorization cache unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
+        raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
+
+    if permission_payload is None:
+        log_message_for_ip(ip_address, "API key is not registered.", PRINT_PREFIX, level="WARNING")
+        raise HTTPException(status_code=403, detail="API key is not registered.")
+
+    return _to_api_key_object(permission_payload)
+
+
+def api_key_rate_limited_factory(too_soon_window_seconds: int | None = None):
+    """Factory for a dependency that enforces the resolved API key's own rate limit."""
+
+    async def api_key_rate_limited(
+        request: Request,
+        api_key: ApiKey = Depends(get_current_api_key),
+    ) -> ApiKey:
+        ip_address = extract_client_ip(request)
+        try:
+            allowed, retry_after = await _check_ratelimit(
+                api_key.key_hash,
+                rate_limit=api_key.rate_limit,
+                window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+                too_soon_window_seconds=too_soon_window_seconds,  # use the value from the factory closure
+            )
+        except (RateLimitServiceUnavailable, PermissionServiceUnavailable):
+            log_message_for_ip(ip_address, "Authorization cache unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
+            raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
+
+        if not allowed:
+            log_message_for_ip(ip_address, f"Rate limit exceeded. Retry after {retry_after} seconds.", PRINT_PREFIX, level="WARNING")
+            raise HTTPException(
+                status_code=429,
+                detail={"error": "Rate limit exceeded.", "retry_after": retry_after},
+            )
+        return api_key
+
+    return api_key_rate_limited
+
+
+def api_key_authorized_factory(permission_level: int, too_soon_window_seconds: int | None = None):
+    """Factory to create a dependency that checks for the required permission level.
+
+    Depends chain: get_current_api_key (exists?) -> api_key_rate_limited (own rate limit) -> this (permission level).
+    On success, the resolved `APIRequestData` is stashed on `request.state.api_data` for handlers/logging that want it.
+    """
+    dependency = api_key_rate_limited_factory(too_soon_window_seconds)
+
+    async def api_key_authorized(
+        request: Request,
+        api_key: ApiKey = Depends(dependency),
+    ) -> ApiKey:
+        if api_key.permission_level < permission_level:
             ip_address = extract_client_ip(request)
-            api_key = extract_bearer_token(request)
-            if not api_key:
-                log_message_for_ip(ip_address, "Missing or invalid Authorization header.", PRINT_PREFIX, level="WARNING")
-                raise HTTPException(
-                    status_code=401,
-                    detail="Missing or invalid Authorization header. Expected: Bearer <api_key>",
-                )
+            log_message_for_ip(ip_address, "Insufficient permissions.", PRINT_PREFIX, level="WARNING")
+            raise HTTPException(status_code=403, detail="Insufficient permissions.")
+        request.state.api_data = to_api_request_data(api_key)
+        return api_key
 
-            key_hash = hash_token(api_key)
-            fingerprint = key_hash[:12]
-
-            try:
-                permission_payload = await _get_api_permission_payload(key_hash)
-                if permission_payload is None:
-                    log_message_for_ip(ip_address, "API key is not registered.", PRINT_PREFIX, level="WARNING")
-                    raise HTTPException(status_code=403, detail="API key is not registered.")
-
-                allowed, retry_after = await _check_ratelimit(
-                    key_hash,
-                    rate_limit=int(permission_payload.get("rate_limit", 1)),
-                    window_seconds=int(permission_payload.get("window_seconds", RATE_LIMIT_WINDOW_SECONDS)),
-                    too_soon_window_seconds=too_soon_window_seconds,
-                )
-                if not allowed:
-                    log_message_for_ip(ip_address, f"Rate limit exceeded. Retry after {retry_after} seconds.", PRINT_PREFIX, level="WARNING")
-                    raise HTTPException(
-                        status_code=429,
-                        detail={"error": "Rate limit exceeded.", "retry_after": retry_after},
-                    )
-
-                effective_level = int(permission_payload.get("permission_level", -1))
-                if effective_level < permission_level:
-                    log_message_for_ip(ip_address, "Insufficient permissions.", PRINT_PREFIX, level="WARNING")
-                    raise HTTPException(status_code=403, detail="Insufficient permissions.")
-
-                api_data = APIRequestData(
-                    api_key_fingerprint=fingerprint,
-                    permission_level=effective_level,
-                    permission_name=PERM_LEVEL_MAP.get(effective_level, "Unknown"),
-                    rate_limit=int(permission_payload.get("rate_limit", 1)),
-                )
-                
-                if request is not None:
-                    request.state.api_data = api_data
-                    request._api_data = api_data
-                return await func(*args, **kwargs)
-            except (RateLimitServiceUnavailable, PermissionServiceUnavailable):
-                log_message_for_ip(ip_address, "Authorization cache unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
-                raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
-
-        return wrapper
-
-    return decorator
-    
+    return api_key_authorized

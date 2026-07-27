@@ -1,20 +1,22 @@
 # ~/src/api/api_db_endpoints/routes/_post_routes.py
 
 from src.api.system.api_db_endpoints.routes.router import router
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
 from src.security.tokens import create_api_key
-from src.security.validation.api_security import api_authentication
+from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.api.system.api_db_endpoints.models import ApiKeyCreateRequest, ApiKeyPatchRequest
 from src.models.crud.system.api_key_crud import update_api_key
+from src.models.tables.system.api_key_table import ApiKey
+
+require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
 
 @router.post("")
 @with_ip_block
-@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def create_key(request: Request, model: ApiKeyCreateRequest):
+async def create_key(request: Request, model: ApiKeyCreateRequest, api_key: ApiKey = Depends(require_super_admin)):
     if model.permission_level >= SUPER_ADMIN_LEVEL:
         raise HTTPException(
             status_code=403,
@@ -41,8 +43,7 @@ async def create_key(request: Request, model: ApiKeyCreateRequest):
 
 @router.patch("/{key_hash}")
 @with_ip_block
-@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def patch_key(request: Request, key_hash: str, model: ApiKeyPatchRequest):
+async def patch_key(request: Request, key_hash: str, model: ApiKeyPatchRequest, api_key: ApiKey = Depends(require_super_admin)):
     if model.new_permission_level is not None and model.new_permission_level >= SUPER_ADMIN_LEVEL:
         raise HTTPException(
             status_code=403,

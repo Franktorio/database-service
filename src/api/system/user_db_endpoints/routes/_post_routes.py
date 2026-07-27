@@ -1,19 +1,21 @@
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from config.loader import PASSWORD_HASH_ALGORITHM, PASSWORD_HASH_ITERATIONS
 from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.system.user_db_endpoints.models import UserCreateRequest
 from src.api.system.user_db_endpoints.routes.router import router
 from src.models.crud.system.user_crud import add_user, get_user_by_username
-from src.security.validation.api_security import api_authentication
+from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
+from src.models.tables.system.api_key_table import ApiKey
+
+require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
 
 @router.post("")
 @with_ip_block
-@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def create_user(request: Request, model: UserCreateRequest):
+async def create_user(request: Request, model: UserCreateRequest, api_key: ApiKey = Depends(require_super_admin)):
     existing_user = await get_user_by_username(model.username)
     if existing_user is not None:
         raise HTTPException(status_code=409, detail=f"User '{model.username}' already exists.")

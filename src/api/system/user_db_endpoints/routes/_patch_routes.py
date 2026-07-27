@@ -1,4 +1,4 @@
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from config.loader import PASSWORD_HASH_ALGORITHM, PASSWORD_HASH_ITERATIONS
 from src.api.config import SUPER_ADMIN_LEVEL
@@ -13,15 +13,17 @@ from src.models.crud.system.user_crud import (
     update_user_login_rate_limit,
     update_user_password,
 )
-from src.security.validation.api_security import api_authentication
+from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
+from src.models.tables.system.api_key_table import ApiKey
+
+require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
 
 @router.patch("/{username}")
 @with_ip_block
-@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def patch_user(username: str, request: Request, model: UserUpdateRequest):
+async def patch_user(username: str, request: Request, model: UserUpdateRequest, api_key: ApiKey = Depends(require_super_admin)):
     try:
         updated = await update_user(
             username,
@@ -53,8 +55,7 @@ async def patch_user(username: str, request: Request, model: UserUpdateRequest):
 
 @router.patch("/{username}/password")
 @with_ip_block
-@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def patch_user_password(username: str, request: Request, model: UserPasswordUpdateRequest):
+async def patch_user_password(username: str, request: Request, model: UserPasswordUpdateRequest, api_key: ApiKey = Depends(require_super_admin)):
     new_password_hash, new_password_salt = hash_password(
         model.new_password,
         iterations=PASSWORD_HASH_ITERATIONS,
@@ -83,8 +84,7 @@ async def patch_user_password(username: str, request: Request, model: UserPasswo
 
 @router.patch("/{username}/login-rate-limit")
 @with_ip_block
-@api_authentication(permission_level=SUPER_ADMIN_LEVEL)
-async def patch_user_login_rate_limit(username: str, request: Request, model: UserLoginRateLimitUpdateRequest):
+async def patch_user_login_rate_limit(username: str, request: Request, model: UserLoginRateLimitUpdateRequest, api_key: ApiKey = Depends(require_super_admin)):
     updated = await update_user_login_rate_limit(
         username,
         new_login_rate_limit=model.new_login_rate_limit,
