@@ -94,7 +94,7 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
         log_message_for_ip(ip_address, f"Password authentication failed: unknown username={username}", "PASSWORD SECURITY", level="WARNING")
         raise HTTPException(status_code=401, detail="Invalid username or password.")
 
-    result = verify_password(password, user.password_hash, salt=user.password_salt, iterations=user.hash_iterations)
+    result = await verify_password(password, user.password_hash, salt=user.password_salt, iterations=user.hash_iterations)
     if not result:
         log_message_for_ip(ip_address, f"Password authentication failed: invalid password for username={username}", "PASSWORD SECURITY", level="WARNING")
         raise HTTPException(status_code=401, detail="Invalid username or password.")

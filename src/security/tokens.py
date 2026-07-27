@@ -1,6 +1,7 @@
 # ~/src/security/tokens.py
 # Generates and validates API keys, password hashes, and JWT auth cookies.
 
+import asyncio
 import secrets
 import hashlib
 import hmac
@@ -63,15 +64,23 @@ def hash_password(
     return derived_key.hex(), chosen_salt
 
 
-def verify_password(
+async def verify_password(
     password: str,
     expected_hash: str,
     salt: str,
     iterations: int = PASSWORD_HASH_ITERATIONS,
 ) -> bool:
     """Verify a plaintext password against a stored hash."""
-    candidate_hash, _ = hash_password(password, salt=salt, iterations=iterations)
-    return hmac.compare_digest(candidate_hash, expected_hash)
+
+    def _verify() -> bool:
+        candidate_hash, _ = hash_password(
+            password,
+            salt=salt,
+            iterations=iterations,
+        )
+        return hmac.compare_digest(candidate_hash, expected_hash)
+
+    return await asyncio.to_thread(_verify)
 
 
 def create_jwt_token(

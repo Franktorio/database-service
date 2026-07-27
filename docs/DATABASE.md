@@ -187,15 +187,15 @@ Conventions to follow when adding a new CRUD module (see [Expansion Guide](EXPAN
 
 ## Cache interplay
 
-Two of the three tables have Redis caches sitting in front of hot read paths — **new tables should follow the pattern that fits their access pattern**, not copy one blindly:
+All three tables now have Redis caches sitting in front of their hot read paths — **new tables should follow the pattern that fits their access pattern**, not copy one blindly:
 
 | Table | Cached? | Cache key | Invalidated on |
 |---|---|---|---|
 | `api_keys` | ✅ Permission payload cached in Redis (`permissions:api_key:<hash>`), TTL `REDIS_PERMISSIONS_EX_SECONDS` (default 300s) | `_get_api_permission_payload()` in `api_security.py` | `add_api_key`, `update_api_key`, `delete_api_key` (via `cache_invalidating`) |
 | `users` | ✅ Permission payload cached in Redis (`permissions:user:<username>`) | `_resolve_user_permissions()` / `_get_user_permission_payload()` | `add_user`, `update_user`, `delete_user`, `update_user_password`, `update_user_login_rate_limit` |
-| `auth_cookies` | ❌ **Not cached** — every cookie-authenticated request queries this table directly via `get_auth_cookie_by_hash()` | n/a | n/a |
+| `auth_cookies` | ✅ Validity payload cached in Redis (`permissions:cookie:<hash>` → `{username, user_id, revoked, expires_at}`) | `_resolve_cookie_row()` in `cookie_security.py` | `add_auth_cookie`, `revoke_auth_cookie`, `refresh_auth_cookie`, `revoke_expired_auth_cookies`, `delete_expired_auth_cookies`, `delete_auth_cookies_by_username` (via `invalidate_cookie_cache`) |
 
-The lack of caching on `auth_cookies` is a known gap — see [Engineering Report §7](ENGINEERING_REPORT.md#7-performance). If you build real (non-test) cookie-authenticated routes, consider adding a Redis-cached `{revoked, expires_at, username, user_id}` lookup mirroring the `api_keys` pattern before relying on it at scale.
+**Update:** the `auth_cookies` caching gap this section originally flagged has been closed. [`_resolve_cookie_row()`](../src/security/validation/cookie_security.py) checks Redis first via `get_cached_permission_json`/`cache_permission_json`, falling back to Postgres only on a cache miss, removing the per-request Postgres round-trip the original design had. Every write path that changes a cookie's validity — add, revoke, refresh/rotate, and both the periodic and bulk expiry sweeps — invalidates the cache through `invalidate_cookie_cache()` in [`cache_invalidation.py`](../src/models/crud/cache_invalidation.py). **One thing to know if you build on this:** the cached payload is a plain `dict`, not the `AuthCookie` ORM object — consumers must use dict access (`row["revoked"]`, not `row.revoked`) and parse `expires_at` back from its ISO-format string with `datetime.fromisoformat(...)` before comparing it to the current time.
 
 **Update:** the three previously-independent `cache_invalidating` decorators in `user_crud.py`, `api_key_crud.py`, and `auth_cookie_crud.py` have been consolidated into a single shared implementation in [`src/models/crud/cache_invalidation.py`](../src/models/crud/cache_invalidation.py) — one `cache_invalidating(invalidator)` decorator factory plus identifier-builder helpers (`user_identifier`, `api_key_identifier`, `cookie_identifier`, `password_identifier`, `ip_block_identifier`) sourced from `config/service_config.json`'s `redis_index_prefixes` block (validated via [`config/settings.py`](../config/settings.py)). **If you add caching for a new table, import and reuse `cache_invalidating` and the identifier helpers from `cache_invalidation.py` instead of writing a new variant.**
 
