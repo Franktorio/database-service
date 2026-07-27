@@ -297,8 +297,8 @@ Combined single-node deployment:
 
 These are current design realities, not aspirational behavior:
 
-- Ratelimits and IP blocks are process-local, not shared across instances.
-- Background services are daemon threads rather than supervised workers.
+- Ratelimits and IP blocks are Redis-backed, but they still depend on Redis availability and TTL alignment.
+- Background services are supervised asyncio tasks rather than daemon threads.
 - SQL echo is enabled only in development mode.
 - The DB engine uses `NullPool`, which limits connection reuse.
 - Healthcheck/restore still requires production hardening before enabling automatic recovery.
