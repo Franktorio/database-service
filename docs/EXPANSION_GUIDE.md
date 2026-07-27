@@ -307,17 +307,34 @@ You will also need a **real login endpoint** for user-facing features — `/logi
 
 ## Configuration for your feature
 
-Don't add new top-level variables to `config/loader.py` for feature-specific tuning unless it's truly global (like a pepper or a pool size). Prefer a new top-level key in `config/service_config.json`, read once in your own module — following the existing pattern in `backup.py`/`dbhealthcheck.py`:
+Don't add new top-level variables to `config/loader.py` for feature-specific tuning unless it's truly global (like a pepper or a pool size). Prefer a new top-level key in `config/service_config.json`, modeled as a typed Pydantic settings class in [`config/settings.py`](../config/settings.py) — following the existing pattern used for `backup`, `dbhealthchecker`, `setup_postgres`, `setup_redis`, and `cookie_expiry`:
 
 ```python
-import json
-from config.loader import PROJECT_ROOT
+# config/settings.py
+class NotesSettings(BaseModel):
+    """Notes feature tuning (src/models/crud/notes/note_crud.py)."""
 
-LOCALCONFIG = json.loads((PROJECT_ROOT / "config" / "service_config.json").read_text()).get("notes", {})
-MAX_NOTE_LENGTH = LOCALCONFIG.get("max_note_length", 10_000)
+    max_note_length: int = Field(
+        default=10_000,
+        ge=1,
+        description="Maximum allowed length of a note body, in characters.",
+    )
+
+class ServiceConfig(BaseModel):
+    ...
+    notes: NotesSettings = Field(default_factory=NotesSettings)
+
+NOTES_SETTINGS: NotesSettings = SERVICE_CONFIG.notes
 ```
 
-(Be aware this repo currently reads `service_config.json` independently in five different files rather than through one shared config object — see [Engineering Report §1](ENGINEERING_REPORT.md#1-project-architecture). Following the existing pattern keeps things consistent today; consolidating it is a good opportunity if you're touching this area anyway.)
+```python
+# src/models/crud/notes/note_crud.py
+from config.settings import NOTES_SETTINGS
+
+MAX_NOTE_LENGTH = NOTES_SETTINGS.max_note_length
+```
+
+`config/service_config.json` is now read and validated exactly once, at import time, through [`config/settings.py`](../config/settings.py) — every module that needs a tunable value should import its typed settings instance from there rather than calling `json.loads(...)` directly.
 
 ## Testing your feature
 
@@ -332,5 +349,5 @@ There is currently no unit-test scaffolding in this repository to extend (see [E
 - ❌ Gating feature routes behind `SUPER_ADMIN_LEVEL` for convenience — reserve it for actual system administration.
 - ❌ Calling `session.execute(...)` directly from a route handler — always go through a CRUD function.
 - ❌ Writing a new password hasher, JWT signer, or rate limiter for a feature-specific need — the existing primitives in `src/security/` and `src/services/system/cache/` are generic and parameterized for exactly this reuse.
-- ❌ Copy-pasting the `cache_invalidating` decorator pattern from any of the three existing (and mutually inconsistent) `system` CRUD modules — if you need write-path cache invalidation, write one small shared helper rather than a fourth variant.
+- ❌ Writing your own cache-invalidation decorator instead of reusing [`src/models/crud/cache_invalidation.py`](../src/models/crud/cache_invalidation.py) — it already provides a shared `cache_invalidating(invalidator)` factory and identifier helpers used by every existing `system` CRUD module; extend it (or call it directly) rather than adding a new variant.
 - ❌ Returning `SomeModel(...).to_dict()` directly from a route without checking every column is safe to expose publicly (see [`docs/DATABASE.md`](DATABASE.md#the-base-model-conventions)).

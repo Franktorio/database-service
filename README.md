@@ -63,7 +63,7 @@ Every request to a protected route passes through, in order: **IP block check â†
 ## Project layout
 
 ```
-config/                 Environment loading (config/loader.py) and service_config.json (tunable knobs)
+config/                 Environment loading (config/loader.py), typed service settings (config/settings.py), service_config.json (tunable knobs)
 main.py                 Process entry point; starts logging then the API server
 src/
   api/
@@ -77,7 +77,9 @@ src/
     base.py             Declarative dataclass Base with to_dict()/from_dict()
     database.py         Async engine, session factory, with_session decorator
     tables/system/      SQLAlchemy ORM models (User, ApiKey, AuthCookie)
-    crud/system/        Async CRUD functions (the only layer that talks to the ORM)
+    crud/
+      cache_invalidation.py  Shared write-path cache invalidation decorator + Redis identifier helpers
+      system/           Async CRUD functions (the only layer that talks to the ORM)
   security/
     tokens.py           API key / password hashing, JWT issuing & verification
     ip_block.py         Redis-backed abusive-IP blocking decorator
@@ -144,7 +146,7 @@ The API listens on `API_PORT` (default `8000`). Visit `http://localhost:8000/doc
 
 ## Configuration
 
-All configuration is environment-driven via `config/.env` (loaded by [`config/loader.py`](config/loader.py); see [`config/.env.example`](config/.env.example) for the full list of variables) plus tunable operational knobs in [`config/service_config.json`](config/service_config.json) (backup interval/retention, health-check leniency, cache sweep intervals, subprocess timeouts).
+All configuration is environment-driven via `config/.env` (loaded by [`config/loader.py`](config/loader.py); see [`config/.env.example`](config/.env.example) for the full list of variables) plus tunable operational knobs in [`config/service_config.json`](config/service_config.json) (backup interval/retention, health-check leniency, cache sweep intervals, subprocess timeouts). `service_config.json` is parsed and validated exactly once, at import time, through typed Pydantic models in [`config/settings.py`](config/settings.py) â€” one model per top-level section (`BackupSettings`, `DbHealthCheckerSettings`, `SetupPostgresSettings`, `SetupRedisSettings`, `CookieExpirySettings`, `RedisIndexPrefixes`), each field documented with a `description`. Every module that needs a tunable value imports its settings instance from `config.settings` rather than reading the JSON file itself.
 
 Key safety behavior: in any `OPERATING_MODE` other than `development`, the app **refuses to start** (raises `RuntimeError`) if `POSTGRESQL_PASSWORD`, `API_KEY_PEPPER`, `PASSWORD_PEPPER`, `JWT_SECRET`, or `REDIS_PASSWORD` are left at their insecure default values.
 

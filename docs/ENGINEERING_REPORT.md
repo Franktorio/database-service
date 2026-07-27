@@ -26,6 +26,8 @@
 
 **Overall: ~6.2 / 10 — a competent, security-conscious mid-level codebase that is not yet production-ready**, primarily due to testing gaps, a blocking-call concurrency bug, and missing operational tooling (containers, monitoring, off-box backups).
 
+> **Resolved since initial audit (2026-07-27, same day):** Two findings below have already been fixed and are annotated inline where they appear (✅): (1) the five independent `json.loads(service_config.json)` call sites and the three divergent `cache_invalidating` decorator implementations were both consolidated — see [`config/settings.py`](../config/settings.py) and [`src/models/crud/cache_invalidation.py`](../src/models/crud/cache_invalidation.py); (2) the dead `ratelimit_cache`/`ip_block_cache` config sections were removed from `config/service_config.json`. The category scores above reflect the original audit and have **not** been recalculated — treat them as a snapshot as of the date above, not a live number.
+
 ---
 
 ## 1. Project Architecture
@@ -43,11 +45,11 @@
 
 - The intended **"system" vs. "application" boundary is purely a folder-naming convention** (`src/api/system/...`, `src/services/system/...`). Nothing prevents a future feature from importing internals of the system layer, and there is no `__all__`, package-private prefix, or architectural test (e.g., `import-linter`) enforcing it. The user's own request to "expand outside of `/system`" is evidence this boundary matters, yet it is unguarded.
 - **Cross-cutting concerns are wired by hand in every route file** instead of centralized. Every single route repeats `@with_ip_block` then `@api_authentication(permission_level=...)` (see every file in `src/api/system/*/routes/_*.py`). There is no shared `APIRouter` dependency, no `Depends()`-based composition — if a developer forgets one decorator or gets the order wrong, there is nothing to catch it.
-- Configuration is split across three mechanisms with different reload/validation semantics: `.env` (via `config/loader.py`), `config/service_config.json` (read ad hoc with `json.loads(Path(...).read_text())` **independently in `backup.py`, `dbhealthcheck.py`, `cookieexpiry.py`, `setup_postgres.py`, `setup_redis.py`**), and in-code constants (`src/api/config.py`). There's no single `Settings` object.
+- **✅ Resolved.** This originally described configuration split across `.env` (`config/loader.py`), ad hoc `json.loads(Path(...).read_text())` reads of `config/service_config.json` duplicated across `backup.py`, `dbhealthcheck.py`, `cookieexpiry.py`, `setup_postgres.py`, and `setup_redis.py`, and in-code constants (`src/api/config.py`). [`config/settings.py`](../config/settings.py) now parses `service_config.json` exactly once into typed, validated Pydantic models (`BackupSettings`, `DbHealthCheckerSettings`, `SetupPostgresSettings`, `SetupRedisSettings`, `CookieExpirySettings`, `RedisIndexPrefixes`), eliminating the five duplicated call sites. **What remains:** `.env` (`config/loader.py`) and `service_config.json` (`config/settings.py`) are still two separate loading mechanisms rather than one unified `Settings` object, and the new models use Pydantic's default "ignore unknown fields" behavior, so a stray or typo'd top-level key would still be silently ignored rather than raising at startup.
 
 #### What a senior engineer would likely change
 
-- Introduce a single `Settings`/config object (e.g., `pydantic-settings`) that merges `.env` and `service_config.json` once, validated at import time, instead of five independent `json.loads(...)` call sites.
+- **✅ Done for `service_config.json`:** [`config/settings.py`](../config/settings.py) now validates it once via typed Pydantic models. **Still open:** merge this with `.env` loading (`config/loader.py`) into one unified `Settings` object (e.g. via `pydantic-settings`), and consider `model_config = {"extra": "forbid"}` on the section models so an unrecognized key fails fast instead of being silently ignored.
 - Replace repeated `@with_ip_block` + `@api_authentication(...)` decorator stacks with a FastAPI `Depends()`-based security dependency so route wiring is declarative, appears in OpenAPI, and cannot be applied out of order.
 - Add a lightweight import-boundary check (even a simple grep-based CI step, or `import-linter`) so "no application code imports from `system` internals" is enforced, not just documented.
 
@@ -70,26 +72,21 @@
 
 #### What's below industry standard
 
-- **The same "invalidate cache after write" concept is implemented three different ways** in three sibling files:
-  - [`user_crud.py`](../src/models/crud/system/user_crud.py) — a plain decorator `cache_invalidating(func)`.
-  - [`api_key_crud.py`](../src/models/crud/system/api_key_crud.py) — an almost-identical but independently duplicated `cache_invalidating(func)` (same name, copy-pasted body, different cache keys).
-  - [`auth_cookie_crud.py`](../src/models/crud/system/auth_cookie_crud.py) — a **decorator factory** `cache_invalidating(invalidator)` with a different call signature entirely.
-
-  Three files, one concept, three implementations, two different APIs sharing one function name. This is the single clearest "below industry standard" code-quality finding in the repository.
-- CRUD read functions (`get_users`, `get_api_keys`, `get_user_by_username`, `get_api_key`, …) are near-identical boilerplate (select → execute → scalar(s)) repeated 8+ times with no shared generic helper.
-- No linter, formatter, or static type checker is configured anywhere in the repository (no `ruff`/`flake8`/`black`/`mypy` config; the only mentions of `black`/`ruff` are commented-out boilerplate in `alembic.ini`). Style consistency today relies entirely on manual discipline.
-- Dead configuration: `config/service_config.json` defines `ratelimit_cache` and `ip_block_cache` blocks (`sweep_interval`, `max_inactive_seconds`) that **no code reads** — a `grep` across `src/` confirms zero references. This is leftover config from a prior in-memory cache design that migrated to Redis without cleanup.
+- **✅ Resolved.** This originally described the same "invalidate cache after write" concept being implemented three different ways across `user_crud.py` (a plain decorator), `api_key_crud.py` (an independently duplicated copy of that decorator), and `auth_cookie_crud.py` (a differently-shaped decorator factory) — three files, one concept, three implementations, two different APIs sharing one function name. [`src/models/crud/cache_invalidation.py`](../src/models/crud/cache_invalidation.py) now provides the single shared `cache_invalidating(invalidator)` decorator factory plus identifier-builder helpers (`user_identifier`, `api_key_identifier`, `cookie_identifier`, `password_identifier`, `ip_block_identifier`), and all three CRUD modules — plus `src/security/ip_block.py`, `api_security.py`, `cookie_security.py`, and `password_security.py` on the read/enforcement side — now import from it instead of re-deriving their own Redis key prefixes.
+- CRUD read functions (`get_users`, `get_api_keys`, `get_user_by_username`, `get_api_key`, …) are near-identical boilerplate (select → execute → scalar(s)) repeated 8+ times with no shared generic helper. *(Still open.)*
+- No linter, formatter, or static type checker is configured anywhere in the repository (no `ruff`/`flake8`/`black`/`mypy` config; the only mentions of `black`/`ruff` are commented-out boilerplate in `alembic.ini`). Style consistency today relies entirely on manual discipline. *(Still open.)*
+- **✅ Resolved.** `config/service_config.json` no longer defines the dead `ratelimit_cache`/`ip_block_cache` blocks this finding originally flagged as unread leftover configuration.
 
 #### What a senior engineer would likely change
 
-- Collapse the three cache-invalidation decorators into one shared utility in a common module (e.g., `src/models/crud/_cache_invalidation.py`) with one call signature.
-- Extract a small generic `get_by_field(model, field, value, session)` / `list_all(model, order_by, session)` helper to remove repeated boilerplate.
-- Add `ruff` (lint + format) and `mypy` to `requirements.txt` / a `pyproject.toml`, wired into CI.
-- Delete or wire up the dead `ratelimit_cache`/`ip_block_cache` config sections.
+- **✅ Done:** the three cache-invalidation decorators have been collapsed into one shared utility, [`src/models/crud/cache_invalidation.py`](../src/models/crud/cache_invalidation.py), with a single call signature.
+- Extract a small generic `get_by_field(model, field, value, session)` / `list_all(model, order_by, session)` helper to remove repeated boilerplate. *(Still open.)*
+- Add `ruff` (lint + format) and `mypy` to `requirements.txt` / a `pyproject.toml`, wired into CI. *(Still open.)*
+- **✅ Done:** the dead `ratelimit_cache`/`ip_block_cache` config sections have been removed from `config/service_config.json`.
 
 #### Severity
 
-**Low-to-Medium.** Nothing here is a bug, but the duplicated decorator pattern is exactly the kind of thing that causes a real bug the next time someone modifies one copy and forgets the other two.
+**Low-to-Medium.** Nothing here is a bug, but the duplicated decorator pattern was exactly the kind of thing that would have caused a real bug the next time someone modified one copy and forgot the other two — that specific risk is now mitigated by the consolidation into `cache_invalidation.py`. The remaining CRUD-boilerplate duplication and missing lint/type tooling keep this category's residual severity at Low-to-Medium.
 
 ---
 
@@ -266,7 +263,7 @@ This is the strongest category in the codebase, and it shows deliberate security
 
 #### What's below industry standard
 
-- **There are zero unit tests.** Nothing in `security/tokens.py`, `security/validation/*`, `models/crud/*`, or `services/*` is tested in isolation. Every one of the concrete bugs identified in this report (the blocking PBKDF2 call, the missing cookie cache, the three divergent `cache_invalidating` implementations) would have been caught immediately by basic unit tests, and none currently exist to catch regressions.
+- **There are zero unit tests.** Nothing in `security/tokens.py`, `security/validation/*`, `models/crud/*`, or `services/*` is tested in isolation. Every one of the concrete bugs identified in this report (the blocking PBKDF2 call, the missing cookie cache, the three divergent `cache_invalidating` implementations — the last of which has since been consolidated, see §2) would have been caught immediately by basic unit tests, and none currently exist to catch regressions.
 - The only test artifact **requires a fully running instance** (`SYSTEM_TEST_BASE_URL`) with a live Postgres, live Redis, and a manually bootstrapped `SYSTEM_TEST_SUPER_ADMIN_KEY` — it cannot run in a clean CI container without significant setup, and it is not wired into any CI pipeline (there is no `.github/workflows` or equivalent in the repository at all).
 - No mocking/fixture layer exists for the database or Redis, so there is no way to test error paths (e.g., "Redis is down mid-request" → `503`) deterministically — those paths are currently unverified by any automated check.
 - No coverage tooling (`coverage.py`/`pytest-cov`) and no way to answer "what % of this codebase is exercised by any test."
@@ -333,7 +330,7 @@ It is also not senior/production-grade code yet, for concrete, checkable reasons
 
 - A senior engineer's PR review would not let the blocking-PBKDF2-in-the-event-loop issue (§7) merge — it directly contradicts the async architecture the rest of the code is built on.
 - A senior engineer would not accept a codebase with **zero unit tests** and no CI as "done," regardless of how good the manual smoke test is.
-- The three divergent implementations of the same `cache_invalidating` concept (§2) are a classic mid-level pattern: the concept is understood, but it wasn't recognized as the *same* concept the second and third time it was needed, so it was never abstracted.
+- The three divergent implementations of the same `cache_invalidating` concept (§2) were a classic mid-level pattern: the concept was understood, but it wasn't recognized as the *same* concept the second and third time it was needed, so it wasn't abstracted until later. *(Since resolved — see `src/models/crud/cache_invalidation.py`.)*
 - Security fundamentals are strong, but the *surrounding* controls a senior engineer treats as non-negotiable at this privilege level — admin audit logging, MFA/IP-allowlisting for the highest-privilege API key — are missing (§5).
 
 #### Signals that led to this conclusion
@@ -389,7 +386,7 @@ It is also not senior/production-grade code yet, for concrete, checkable reasons
 1. **Blocking CPU-bound PBKDF2 call inside the async event loop** (`authenticate_password` → `verify_password`) — stalls the entire process during logins.
 2. **Zero unit tests and no CI pipeline** — only a live, infra-dependent smoke-test script exists.
 3. **Cookie authentication has no cache**, unlike API-key authentication, creating a Postgres round-trip on every cookie-authenticated request.
-4. **Three divergent implementations** of the same `cache_invalidating` decorator concept across `user_crud.py`, `api_key_crud.py`, `auth_cookie_crud.py`.
+4. **✅ Resolved — three divergent implementations** of the `cache_invalidating` decorator concept across `user_crud.py`, `api_key_crud.py`, `auth_cookie_crud.py` have been consolidated into [`src/models/crud/cache_invalidation.py`](../src/models/crud/cache_invalidation.py).
 5. **No containerization, CI/CD, or monitoring/metrics** — production deployment story is essentially a manual runbook.
 6. **Backups stored on the same disk as the live database** — no off-box disaster-recovery copy.
 7. **No pagination on list endpoints** (`GET /api/db/users`, `GET /api/db/keys`) — full-table scans returned as JSON.
@@ -413,7 +410,7 @@ It is also not senior/production-grade code yet, for concrete, checkable reasons
 
 1. **Async/await discipline end-to-end** — recognizing that "the function is `async def`" is not the same as "nothing in this call chain blocks the event loop." This single gap (§7) is the most consequential finding in the report.
 2. **Automated testing culture** — unit and integration testing with fixtures/mocking (`pytest`, `pytest-asyncio`, a disposable test database), not just manual/live smoke scripts. This is the fastest way to have caught most of the other findings in this report before they shipped.
-3. **Recognizing repeated patterns across files** *while writing them*, not after — the three `cache_invalidating` implementations are a symptom of writing each file in isolation rather than reaching for a shared abstraction the second time the need appeared.
+3. **Recognizing repeated patterns across files** *while writing them*, not after — the three `cache_invalidating` implementations (since consolidated into `src/models/crud/cache_invalidation.py`) were a symptom of writing each file in isolation rather than reaching for a shared abstraction the second time the need appeared.
 4. **Operational/production engineering breadth** — containerization, CI/CD, monitoring/alerting, off-box backups. The application-level reliability engineering here (health checks, supervised tasks) is already strong; the surrounding "how does this actually get deployed and observed" layer is the clear next growth area.
 5. **API contract discipline** — designing for consumers who only read `/docs`, via `Depends()`-based auth, `response_model=`, and a single consistent error envelope, rather than relying on decorators that work correctly but aren't visible to tooling.
 
@@ -427,7 +424,7 @@ This codebase reflects a developer who has clearly studied and internalized seve
 
 | Timeframe | Focus | Concrete actions |
 |---|---|---|
-| **Immediate** (before any real traffic; hours-to-days of work) | Stop the bleeding on the two highest-severity findings | • Wrap `hash_password`/`verify_password` calls in `asyncio.to_thread(...)` (§7). <br>• Add pagination (`limit`/`offset`) to `GET /api/db/users` and `GET /api/db/keys` (§3/§4). <br>• Delete or wire up the dead `ratelimit_cache`/`ip_block_cache` config sections (§2). <br>• Add a global FastAPI exception handler for unexpected exceptions so 500s are consistent. |
-| **Short term** (next few weeks) | Testing and code-quality debt | • Stand up `pytest` + `pytest-asyncio` with a disposable Postgres test database; write unit tests for `security/tokens.py`, `security/validation/*`, and the CRUD layer first. <br>• Add a minimal GitHub Actions CI workflow (lint + unit tests) — even without full coverage, this catches regressions going forward. <br>• Collapse the three `cache_invalidating` implementations into one shared utility. <br>• Move authentication onto FastAPI `Depends()` so `/docs` reflects reality; add `response_model=` to every route. |
+| **Immediate** (before any real traffic; hours-to-days of work) | Stop the bleeding on the two highest-severity findings | • Wrap `hash_password`/`verify_password` calls in `asyncio.to_thread(...)` (§7). <br>• Add pagination (`limit`/`offset`) to `GET /api/db/users` and `GET /api/db/keys` (§3/§4). <br>• **✅ Done:** the dead `ratelimit_cache`/`ip_block_cache` config sections (§2) have been removed. <br>• Add a global FastAPI exception handler for unexpected exceptions so 500s are consistent. |
+| **Short term** (next few weeks) | Testing and code-quality debt | • Stand up `pytest` + `pytest-asyncio` with a disposable Postgres test database; write unit tests for `security/tokens.py`, `security/validation/*`, and the CRUD layer first. <br>• Add a minimal GitHub Actions CI workflow (lint + unit tests) — even without full coverage, this catches regressions going forward. <br>• **✅ Done:** the three `cache_invalidating` implementations have been collapsed into one shared utility (`src/models/crud/cache_invalidation.py`). <br>• Move authentication onto FastAPI `Depends()` so `/docs` reflects reality; add `response_model=` to every route. |
 | **Medium term** (1–3 months) | Cache parity, ops maturity, audit trail | • Add Redis caching for `auth_cookies` validity, mirroring the existing API-key permission cache (§7). <br>• Add a persisted admin audit log table for user/API-key mutations. <br>• Add a `Dockerfile` + `docker-compose.yml` for app/Postgres/Redis, and an off-box backup step (e.g., push `pg_dump` output to S3/remote storage after each successful run). <br>• Add a `/healthz` endpoint decoupled from the internal auto-rollover health check, for external load balancers/uptime monitors. |
 | **Long term** (3–6+ months, as real traffic materializes) | Hardening and horizontal scale | • Add MFA or IP allowlisting for `SUPER_ADMIN` API keys. <br>• Add CSRF protection before any real cookie-authenticated mutation route ships. <br>• Introduce a normalized roles/permissions table if role complexity grows beyond a flat string array. <br>• Run multiple Uvicorn workers behind a process manager/load balancer once the blocking-call fix is verified, and revisit Postgres pool sizing accordingly. <br>• Evaluate a migration path from PBKDF2 to Argon2id using the existing per-user `hash_algorithm` column as the versioning mechanism. |

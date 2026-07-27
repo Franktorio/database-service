@@ -197,7 +197,7 @@ Two of the three tables have Redis caches sitting in front of hot read paths —
 
 The lack of caching on `auth_cookies` is a known gap — see [Engineering Report §7](ENGINEERING_REPORT.md#7-performance). If you build real (non-test) cookie-authenticated routes, consider adding a Redis-cached `{revoked, expires_at, username, user_id}` lookup mirroring the `api_keys` pattern before relying on it at scale.
 
-**Important:** the three existing `cache_invalidating` decorators in `user_crud.py`, `api_key_crud.py`, and `auth_cookie_crud.py` are three *independent, slightly different* implementations of the same idea (see [Engineering Report §2](ENGINEERING_REPORT.md#2-code-quality)). If you add caching for a new table, don't copy-paste a fourth variant — factor out a shared helper first if practical.
+**Update:** the three previously-independent `cache_invalidating` decorators in `user_crud.py`, `api_key_crud.py`, and `auth_cookie_crud.py` have been consolidated into a single shared implementation in [`src/models/crud/cache_invalidation.py`](../src/models/crud/cache_invalidation.py) — one `cache_invalidating(invalidator)` decorator factory plus identifier-builder helpers (`user_identifier`, `api_key_identifier`, `cookie_identifier`, `password_identifier`, `ip_block_identifier`) sourced from `config/service_config.json`'s `redis_index_prefixes` block (validated via [`config/settings.py`](../config/settings.py)). **If you add caching for a new table, import and reuse `cache_invalidating` and the identifier helpers from `cache_invalidation.py` instead of writing a new variant.**
 
 ## Migrations (Alembic)
 
