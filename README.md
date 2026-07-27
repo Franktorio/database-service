@@ -1,310 +1,193 @@
-# Database Service
+# Clean Database Service
 
-Async FastAPI + PostgreSQL service for small-scale administrative database operations. The current codebase provides:
+A self-contained **FastAPI + PostgreSQL + Redis** backend that provides authentication, API-key management, user management, rate limiting, IP blocking, automated backups, and database health monitoring out of the box. It is designed as a foundation ("system layer") that application-specific features are built on top of.
 
-- API-key-protected system administration endpoints.
-- User account CRUD with password hashing and cookie-based login.
-- Redis-backed token-bucket rate limiting for API keys, login attempts, cookie sessions, and IP blocking (with in-process cache wrappers).
-- Background backup, cookie-expiry cleanup, and DB healthcheck services.
-- PostgreSQL bootstrap and schema-migration helper scripts.
+> **Status:** Development codebase. No production data, clients, or applied migrations are tied to this repository — it is safe to experiment with, reset, and restructure.
 
-## What It Actually Contains
+---
 
-System tables currently managed by the service:
+## Table of Contents
 
-- `users`
-- `api_keys`
-- `auth_cookies`
+- [What this is](#what-this-is)
+- [Architecture at a glance](#architecture-at-a-glance)
+- [Project layout](#project-layout)
+- [Requirements](#requirements)
+- [Getting started](#getting-started)
+- [Configuration](#configuration)
+- [Running the service](#running-the-service)
+- [Operational scripts](#operational-scripts)
+- [Background services](#background-services)
+- [Documentation](#documentation)
+- [License](#license)
 
-Important index coverage:
+---
 
-- `users.username` via unique constraint.
-- `api_keys.key_hash` via unique constraint.
-- `api_keys.created_at` explicit index.
-- `auth_cookies.token_hash` via unique constraint.
-- `auth_cookies.username` explicit index.
-- `auth_cookies(expires_at, revoked)` explicit composite index.
+## What this is
 
-## Technology Stack
+The service exposes a small, opinionated **system API** for:
 
-- Python 3.12
-- FastAPI + Uvicorn
-- SQLAlchemy async + asyncpg
-- PostgreSQL
+| Capability | Description |
+|---|---|
+| **API keys** | Create, list, patch, and delete API keys with tiered permission levels and per-key rate limits. |
+| **Users** | Create, list, patch, and delete user accounts with role-based access, password rotation, and login rate limiting. |
+| **Authentication** | Bearer API keys for service-to-service calls, and signed JWT cookies (with server-side revocation) for browser-style sessions. |
+| **Abuse protection** | Redis-backed sliding-window rate limiting and automatic temporary IP blocking on abusive bursts. |
+| **Reliability services** | Scheduled PostgreSQL backups, a database health checker with optional auto-restore, and expired-cookie cleanup — all running as supervised background asyncio tasks. |
 
-## Runtime Architecture
+Everything under `src/**/system` is meant to be treated as **infrastructure** — the intent is that new, product-specific functionality is added *alongside* it (new tables, new CRUD modules, new routers) rather than by modifying it. See [`docs/EXPANSION_GUIDE.md`](docs/EXPANSION_GUIDE.md) for a concrete walkthrough.
 
-Startup flow today:
+## Architecture at a glance
 
-1. Logging is initialized in `main.py`.
-2. Uvicorn starts the FastAPI app.
-3. During API lifespan startup, the app verifies DB connectivity.
-4. Async service loops (backup, DB healthcheck, and cookie expiry when enabled) start as FastAPI lifespan tasks on the same event loop.
-
-Primary code areas:
-
-- `main.py`: process entrypoint.
-- `config/loader.py`: environment loading and secret safety checks.
-- `config/service_config.json`: service intervals, retention, and timeouts.
-- `src/api`: app registration, request models, and admin route surfaces.
-- `src/models`: SQLAlchemy base, DB engine, table models, CRUD helpers.
-- `src/security`: API key auth, cookie auth, password auth, token utilities, IP blocking, rate limiting.
-- `src/services`: backup, DB healthcheck, cookie-expiry sweep, logging, and cache helpers.
-- `tools/scripts`: PostgreSQL setup, Redis setup, API key bootstrap, schema migration, and backup apply utilities.
-
-## Configuration
-
-Create `config/.env` and set at minimum:
-
-- `OPERATING_MODE`
-- `POSTGRESQL_DATABASE_NAME`
-- `POSTGRESQL_USERNAME`
-- `POSTGRESQL_PASSWORD`
-- `POSTGRESQL_HOST`
-- `POSTGRESQL_PORT`
-- `API_ENABLED`
-- `API_PORT`
-- `API_EXPOSE_TEST_ENDPOINTS`
-- `API_KEY_PEPPER`
-- `PASSWORD_PEPPER`
-- `JWT_SECRET`
-- `JWT_ALGORITHM`
-- `JWT_EXP_MINUTES`
-
-Also supported:
-
-- `API_KEY_TOKEN_BYTES`
-- `PASSWORD_HASH_ITERATIONS`
-- `PASSWORD_HASH_ALGORITHM`
-- `LOGIN_ATTEMPTS_LIMIT`
-- `LOGIN_TIME_WINDOW`
-- `COOKIE_DEFAULT_RATE_LIMIT`
-- `RATE_LIMIT_WINDOW_SECONDS`
-- `IP_BLOCKING_ENABLED`
-- `IP_BLOCKING_THRESHOLD`
-- `IP_BLOCKING_TIME_WINDOW`
-- `IP_BLOCKING_DURATION`
-- `TRUSTED_PROXIES`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_PASSWORD`
-
-IP blocking defaults (app-level):
-
-- `IP_BLOCKING_ENABLED='true'`
-- `IP_BLOCKING_THRESHOLD='200'`
-- `IP_BLOCKING_TIME_WINDOW='15'`
-- `IP_BLOCKING_DURATION='1800'`
-- Default behavior: 200 requests within 15 seconds blocks that IP for 30 minutes.
-
-Secret-safety behavior:
-
-- In non-development mode, unsafe defaults for PostgreSQL password, API-key pepper, password pepper, JWT secret, and Redis password raise at startup.
-- In development mode, those unsafe defaults only log warnings.
-
-## Service Runtime Config
-
-`config/service_config.json` currently controls:
-
-- `backup`
-  - `enabled`
-  - `interval`
-  - `retention`
-  - `backup_dir`
-  - `subprocess_timeout_seconds`
-- `dbhealthchecker`
-  - `enabled`
-  - `auto_rollover`
-  - `shutdown_on_failure`
-  - `leniency`
-  - `interval`
-  - `reparations_interval`
-  - `backup_dir`
-  - `healthcheck_timeout_seconds`
-  - `restore_subprocess_timeout_seconds`
-  - `max_restore_attempts`
-- `setup_postgres`
-  - `command_subprocess_timeout_seconds`
-  - `probe_subprocess_timeout_seconds`
-- `setup_redis`
-  - `command_subprocess_timeout_seconds`
-  - `probe_subprocess_timeout_seconds`
-- `ratelimit_cache`
-  - `enabled`
-  - `sweep_interval`
-  - `max_inactive_seconds`
-- `cookie_expiry`
-  - `enabled`
-  - `sweep_interval`
-- `ip_block_cache`
-  - `enabled`
-  - `sweep_interval`
-  - `max_inactive_seconds`
-
-## Running Locally
-
-Install dependencies:
-
-```bash
-pip3 install -r requirements.txt
+```mermaid
+flowchart LR
+    Client -->|HTTPS| Uvicorn[Uvicorn / FastAPI]
+    Uvicorn --> IPBlock[IP Block Decorator]
+    IPBlock --> Auth[API Key / Cookie Auth]
+    Auth --> Routes[Route Handlers]
+    Routes --> CRUD[CRUD Layer]
+    CRUD --> PG[(PostgreSQL)]
+    Auth <--> Redis[(Redis: rate limits, permission cache, IP blocks)]
+    subgraph Background Tasks
+        Backup[Backup Service]
+        Health[DB Health Check]
+        CookieExpiry[Cookie Expiry Sweep]
+    end
+    Backup --> PG
+    Health --> PG
+    CookieExpiry --> PG
 ```
 
-Start the service:
+Every request to a protected route passes through, in order: **IP block check → authentication/authorization → rate limiting → route handler → CRUD → database**. Rate limits, permission lookups, and IP blocks are all served from Redis so PostgreSQL is only touched on cache misses and writes.
+
+## Project layout
+
+```
+config/                 Environment loading (config/loader.py) and service_config.json (tunable knobs)
+main.py                 Process entry point; starts logging then the API server
+src/
+  api/
+    app.py              FastAPI app, lifespan (DB init + background tasks), root/test routes
+    config.py           Permission level constants
+    models.py           Shared Pydantic request/response models
+    system/
+      api_db_endpoints/ API key admin routes  (/api/db/keys)
+      user_db_endpoints/ User admin routes     (/api/db/users)
+  models/
+    base.py             Declarative dataclass Base with to_dict()/from_dict()
+    database.py         Async engine, session factory, with_session decorator
+    tables/system/      SQLAlchemy ORM models (User, ApiKey, AuthCookie)
+    crud/system/        Async CRUD functions (the only layer that talks to the ORM)
+  security/
+    tokens.py           API key / password hashing, JWT issuing & verification
+    ip_block.py         Redis-backed abusive-IP blocking decorator
+    extract.py          Request header/cookie/IP extraction helpers
+    validation/         api_security.py, cookie_security.py, password_security.py
+  services/
+    supervisor.py       Restart-with-backoff wrapper for background asyncio tasks
+    system/
+      logging.py        Queue + worker-thread logger (console + rotating file)
+      backup.py          Scheduled pg_dump backups with retention
+      dbhealthcheck.py   Periodic SELECT 1 checks, optional auto-restore-from-backup
+      cookieexpiry.py    Periodic revocation of expired JWT cookie rows
+      cache/             Redis client, rate-limit cache, permission cache, Lua scripts
+migrations/             Alembic migration environment + versions
+tools/
+  scripts/              One-off operational scripts (bootstrap Postgres/Redis, generate keys, restore backups)
+  tests/                Live, end-to-end HTTP test script against a running instance
+docs/                   Engineering report, API/DB reference, expansion guide (this deliverable)
+```
+
+## Requirements
+
+- Python **3.10+** (developed against 3.12)
+- PostgreSQL 13+
+- Redis 6+ (Lua `EVAL` scripting support)
+- `pg_dump` / `psql` client binaries available on `PATH` (used by the backup and health-check services)
+
+Python dependencies are pinned in [`requirements.txt`](requirements.txt).
+
+## Getting started
 
 ```bash
+# 1. Clone and enter the project
+cd clean-database-service
+
+# 2. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure the environment
+cp config/.env.example config/.env
+# edit config/.env: set real DB/Redis credentials and generate random
+# values for API_KEY_PEPPER, PASSWORD_PEPPER, and JWT_SECRET
+
+# 5. Provision PostgreSQL and Redis (Debian/Ubuntu hosts with sudo access)
+python3 -m tools.scripts.setup_postgres
+python3 -m tools.scripts.setup_redis
+
+# 6. Apply database migrations
+alembic upgrade head
+
+# 7. Bootstrap a SUPER_ADMIN API key (required — the API refuses to mint
+#    SUPER_ADMIN keys over HTTP)
+python3 -m tools.scripts.generate_api_key 4 1000
+
+# 8. Run the service
 python3 main.py
 ```
 
-## Live System API Test
+The API listens on `API_PORT` (default `8000`). Visit `http://localhost:8000/docs` for the interactive OpenAPI/Swagger UI generated automatically by FastAPI.
 
-The live end-to-end system API test is folder-based and covers all current API routes:
+## Configuration
 
-- `tools/tests/live_system_api_test.py`
+All configuration is environment-driven via `config/.env` (loaded by [`config/loader.py`](config/loader.py); see [`config/.env.example`](config/.env.example) for the full list of variables) plus tunable operational knobs in [`config/service_config.json`](config/service_config.json) (backup interval/retention, health-check leniency, cache sweep intervals, subprocess timeouts).
 
-Required environment variable:
+Key safety behavior: in any `OPERATING_MODE` other than `development`, the app **refuses to start** (raises `RuntimeError`) if `POSTGRESQL_PASSWORD`, `API_KEY_PEPPER`, `PASSWORD_PEPPER`, `JWT_SECRET`, or `REDIS_PASSWORD` are left at their insecure default values.
 
-- `SYSTEM_TEST_SUPER_ADMIN_KEY`
+## Running the service
 
-Base URL resolution:
+`main.py` initializes logging, then calls `start_api_server()`, which runs a single Uvicorn process (`uvicorn.run(app, ...)`) that also owns the asyncio event loop used by all background services. On startup, the FastAPI `lifespan` handler:
 
-- Uses `SYSTEM_TEST_BASE_URL` when set.
-- Otherwise builds `http://127.0.0.1:<API_PORT>` from `config/.env`.
+1. Verifies database connectivity (`SELECT 1`).
+2. Starts the backup, health-check, and cookie-expiry loops (each wrapped in a `TaskSupervisor` that restarts on failure with exponential backoff), if enabled in `service_config.json`.
+3. Signals readiness so background services that were started outside the API process can begin.
 
-Run in current process:
+On shutdown, background tasks are cancelled, the Redis client is closed, and the database engine is disposed.
 
-```bash
-python3 tools/tests/live_system_api_test.py
-```
+## Operational scripts
 
-## Current API Surface
+Run all scripts from the project root as modules (they rely on `src`/`config` being importable):
 
-Public/test endpoints:
+| Script | Purpose |
+|---|---|
+| `python3 -m tools.scripts.setup_postgres` | Installs, starts, and configures a local PostgreSQL instance and application role/database (Debian/Ubuntu + systemd). |
+| `python3 -m tools.scripts.setup_redis` | Installs, starts, and password-protects a local Redis instance. |
+| `python3 -m tools.scripts.generate_api_key <level> <rate_limit>` | Mints a new API key directly against the database — the **only** way to create a `SUPER_ADMIN` (level 4) key. |
+| `python3 -m tools.scripts.apply_backup <backup_file>` | Restores the database from a specific `backups/*.sql` file (drops and recreates the database first). |
+| `python3 -m tools.tests.live_system_api_test` | End-to-end smoke test against a **running** instance; requires `SYSTEM_TEST_SUPER_ADMIN_KEY`. Not a unit test suite. |
 
-- `GET /`
+## Background services
 
-Conditional test/auth utility endpoints (`API_EXPOSE_TEST_ENDPOINTS=true`):
+| Service | File | Enabled via | Behavior |
+|---|---|---|---|
+| Backup | `src/services/system/backup.py` | `service_config.json:backup.enabled` | Runs `pg_dump` on an interval, keeps the newest N backups (`retention`). |
+| DB Health Check | `src/services/system/dbhealthcheck.py` | `service_config.json:dbhealthchecker.enabled` | Periodic connectivity probe; can auto-restore from the latest backup or shut the process down after repeated failures. |
+| Cookie Expiry | `src/services/system/cookieexpiry.py` | `service_config.json:cookie_expiry.enabled` | Periodically marks expired `auth_cookies` rows as revoked. |
 
-- `POST /api-auth-test`
-- `POST /login-auth-test`
-- `POST /cookie-auth-test`
-
-SUPER_ADMIN API-key-protected endpoints:
-
-- `GET /api/db/keys`
-- `POST /api/db/keys`
-- `PATCH /api/db/keys/{key_hash}`
-- `DELETE /api/db/keys/{key_hash}`
-- `GET /api/db/users`
-- `GET /api/db/users/{username}`
-- `POST /api/db/users`
-- `PATCH /api/db/users/{username}`
-- `PATCH /api/db/users/{username}/password`
-- `PATCH /api/db/users/{username}/login-rate-limit`
-- `DELETE /api/db/users/{username}`
-
-Important request-format note:
-
-- All API-key-protected endpoints use `Authorization: Bearer <api_key>`.
-
-## Utility Scripts
-
-PostgreSQL setup:
-
-```bash
-python3 -m tools.scripts.setup_postgres
-```
-
-Redis setup:
-
-```bash
-python3 -m tools.scripts.setup_redis
-```
-
-Generate a bootstrap API key:
-
-```bash
-python3 -m tools.scripts.generate_api_key <permission_level> <rate_limit>
-```
-
-Run schema-first migration copy/swap:
-
-```bash
-python3 -m tools.scripts.migrate_db
-```
-
-Apply Alembic revisions:
-
-```bash
-alembic upgrade head
-```
-
-Apply a SQL backup file:
-
-```bash
-python3 -m tools.scripts.apply_backup <backup_file_path>
-```
-
-## Logging
-
-- Console logging plus daily-rotated file logging through the shared logger in `src/services/system/logging.py`.
-- Routine info/debug chatter is intentionally minimized in startup, request, and CRUD paths.
-- Active file: `logs/db_service_logs.log`.
-- Rotation: midnight.
-- Retention: 7 rotated files.
-- Development mode still enables debug-level output, but the codebase now uses that level more sparingly.
-
-## Deployment Notes
-
-This repository is currently optimized for a single-node Linux deployment. The included PostgreSQL setup flow assumes Debian/Ubuntu-style package management and `systemd`.
-
-Reverse-proxy deployments should be configured carefully: trusted forwarding headers are only honored when the peer IP is listed in `TRUSTED_PROXIES`.
-
-If you split the system into dedicated nodes, keep the same `config/.env` values on every node so the API, PostgreSQL, and Redis services all point at the same shared endpoints.
-
-### Common Node Profiles
-
-API node:
-
-- Run `python3 main.py`.
-- Keep `API_ENABLED=true`.
-- Enable only the background services you actually want on that node.
-- For a lean API-only node, set these in `config/service_config.json`:
-  - `backup.enabled=false`
-  - `dbhealthchecker.enabled=false`
-  - `cookie_expiry.enabled=false`
-  - `ratelimit_cache.enabled=false`
-  - `ip_block_cache.enabled=false`
-
-PostgreSQL node:
-
-- Install PostgreSQL and run `python3 -m tools.scripts.setup_postgres`.
-- Keep the database-related `POSTGRESQL_*` values the same as the API node expects.
-- Do not enable the API runtime services on this node unless you also run the application there.
-
-Redis node:
-
-- Install Redis and run `python3 -m tools.scripts.setup_redis`.
-- Keep the Redis connection values in `config/.env` aligned with the API node.
-- Do not enable the API runtime services on this node unless you also run the application there.
-
-Combined single-node deployment:
-
-- Leave the default service flags enabled if you want the full all-in-one setup.
-- This mode is the simplest option when PostgreSQL and Redis are local to the same machine as the API.
-
-## Known Limitations
-
-These are current design realities, not aspirational behavior:
-
-- Ratelimits and IP blocks are Redis-backed, but they still depend on Redis availability and TTL alignment.
-- Background services are supervised asyncio tasks rather than daemon threads.
-- SQL echo is enabled only in development mode.
-- The DB engine uses SQLAlchemy's pooled async engine with configured size/timeouts, so connection reuse depends on those pool settings.
-- Healthcheck/restore still requires production hardening before enabling automatic recovery.
+All three are wrapped by [`TaskSupervisor`](src/services/supervisor.py), which restarts a crashed loop with exponential backoff up to a configurable attempt limit.
 
 ## Documentation
 
-- API reference: `docs/API.md`
-- Database reference: `docs/DB.md`
-- Expansion pattern: `docs/API_DB_FORMAT.md`
-- Full codebase review: `docs/ENGINEERING_REVIEW_2026-07-26.md`
+Detailed, deep-dive documentation lives in [`docs/`](docs/):
+
+- **[`docs/ENGINEERING_REPORT.md`](docs/ENGINEERING_REPORT.md)** — A critical, category-by-category engineering audit of this codebase against industry practice, including concurrent-user capacity estimates on a $10 VPS.
+- **[`docs/API.md`](docs/API.md)** — Full reference for every HTTP endpoint (auth, request/response shapes, status codes).
+- **[`docs/DATABASE.md`](docs/DATABASE.md)** — Schema reference, SQLAlchemy conventions, migration workflow.
+- **[`docs/EXPANSION_GUIDE.md`](docs/EXPANSION_GUIDE.md)** — How to add new, product-specific features (tables, CRUD, routes) without touching the `system` layer.
+
+## License
+
+[MIT](LICENSE) — Copyright (c) 2026 Nightfall Development Group.
