@@ -12,6 +12,7 @@ The service uses **PostgreSQL** via **SQLAlchemy 2.0** (async, `asyncpg` driver)
   - [`users`](#users)
   - [`api_keys`](#api_keys)
   - [`auth_cookies`](#auth_cookies)
+  - [`audit_logs`](#audit_logs)
   - [Entity relationship diagram](#entity-relationship-diagram)
 - [The `Base` model conventions](#the-base-model-conventions)
 - [CRUD layer conventions](#crud-layer-conventions)
@@ -118,6 +119,21 @@ Tracks issued JWT cookie sessions so they can be revoked server-side even though
 
 **Composite index:** `ix_auth_cookies_expires_at_revoked` on `(expires_at, revoked)` — directly supports the cookie-expiry sweep query (`WHERE expires_at <= now() AND revoked = false`) run by [`src/services/system/cookieexpiry.py`](../src/services/system/cookieexpiry.py) every `sweep_interval` seconds (default 60s).
 
+### `audit_logs`
+
+Append-only trail of every mutating write made through the `system` admin CRUD modules (`api_key_crud.py`, `user_crud.py`). Written by [`add_audit_log()`](../src/models/crud/system/audit_log_crud.py) via the `audit_logged(action)` decorator — see [CRUD layer conventions](#crud-layer-conventions) below. **Read-only from the API:** only `GET /api/db/audit-logs` and `GET /api/db/audit-logs/{log_id}` exist (see [API.md](API.md)); there is no create/update/delete route, and the CRUD module itself only exposes `add_audit_log`/`get_audit_logs`/`get_audit_log_by_id` — no update or delete functions at all.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `Integer` | PK, auto | |
+| `action` | `String` | `NOT NULL` | machine-readable action name, e.g. `"user.create"`, `"api_key.delete"` |
+| `user_id` | `Integer` | nullable, FK → `users.id` **(`ON DELETE SET NULL`)**, indexed | set when the actor authenticated via cookie session |
+| `api_key_id` | `Integer` | nullable, FK → `api_keys.id` **(`ON DELETE SET NULL`)**, indexed | set when the actor authenticated via API key (the common case today, since all `system` admin routes are `SUPER_ADMIN` API-key-gated) |
+| `ip_address` | `String` | `NOT NULL` | client IP the request originated from |
+| `timestamp` | `DateTime(timezone=True)` | `NOT NULL`, `server_default=now()`, **indexed** | |
+
+> Both `user_id` and `api_key_id` use `ON DELETE SET NULL` rather than `CASCADE` — deleting a user or API key later must never silently delete the audit trail of what that identity did.
+
 ### Entity relationship diagram
 
 ```mermaid
@@ -154,9 +170,17 @@ erDiagram
         datetime created_at
         datetime last_updated_at
     }
+    AUDIT_LOGS {
+        int id PK
+        string action
+        int user_id FK
+        int api_key_id FK
+        string ip_address
+        datetime timestamp
+    }
 ```
 
-Note that `api_keys` has **no relationship** to `users` — API keys are an independent, service-level credential, not tied to a specific user account. This is a deliberate separation: users authenticate as *people* (cookie/JWT), API keys authenticate as *callers/services* (bearer token).
+Note that `api_keys` has **no relationship** to `users` — API keys are an independent, service-level credential, not tied to a specific user account. This is a deliberate separation: users authenticate as *people* (cookie/JWT), API keys authenticate as *callers/services* (bearer token). `audit_logs` is the one table that references both — each row optionally points at whichever credential type authenticated the request that produced it (both FKs are `ON DELETE SET NULL`, so the log entry outlives the credential).
 
 ## The `Base` model conventions
 
@@ -184,6 +208,7 @@ Conventions to follow when adding a new CRUD module (see [Expansion Guide](EXPAN
 3. `await session.commit()` after every write; `await session.refresh(obj)` if the caller needs DB-generated values (timestamps, defaults) back.
 4. Log not-found/failure cases with `log_message(...)` at `WARNING` level rather than raising for simple "not found" reads (return `None`/`False` and let the route layer decide the HTTP status).
 5. If the table participates in caching (see below), invalidate the relevant cache key(s) on every write path.
+6. If the write should be attributable in the audit trail (i.e. it mutates `users` or `api_keys`), wrap it with `@audit_logged("<action>")` from [`audit_log_crud.py`](../src/models/crud/system/audit_log_crud.py) — see [Cache interplay](#cache-interplay) below for how it's wired up on the existing modules.
 
 ## Cache interplay
 
@@ -194,6 +219,12 @@ All three tables now have Redis caches sitting in front of their hot read paths 
 | `api_keys` | ✅ Permission payload cached in Redis (`permissions:api_key:<hash>`), TTL `REDIS_PERMISSIONS_EX_SECONDS` (default 300s) | `_get_api_permission_payload()` in `api_security.py` | `add_api_key`, `update_api_key_by_id`, `delete_api_key_by_id` (via `cache_invalidating`/direct invalidation) |
 | `users` | ✅ Permission payload cached in Redis (`permissions:user:<username>`) | `_resolve_user_permissions()` / `_get_user_permission_payload()` | `add_user`, `update_user`, `delete_user`, `update_user_password`, `update_user_login_rate_limit` |
 | `auth_cookies` | ✅ Validity payload cached in Redis (`permissions:cookie:<hash>` → `{username, user_id, revoked, expires_at}`) | `_resolve_cookie_row()` in `cookie_security.py` | `add_auth_cookie`, `revoke_auth_cookie`, `refresh_auth_cookie`, `revoke_expired_auth_cookies`, `delete_expired_auth_cookies`, `delete_auth_cookies_by_username` (via `invalidate_cookie_cache`) |
+
+### Audit logging
+
+`add_user`, `update_user`, `delete_user`, `update_user_password`, `update_user_login_rate_limit` (in [`user_crud.py`](../src/models/crud/system/user_crud.py)) and `add_api_key`, `update_api_key_by_id`, `delete_api_key_by_id` (in [`api_key_crud.py`](../src/models/crud/system/api_key_crud.py)) are all wrapped with `@audit_logged("<action>")` from [`audit_log_crud.py`](../src/models/crud/system/audit_log_crud.py). This is enforced at the CRUD layer, not the route layer — a write can't reach the database without also producing an audit log entry, regardless of what calls the CRUD function (a route, a script, anything).
+
+The decorator attributes each entry to the identity currently stored in [`audit_context.py`](../src/models/crud/audit_context.py)'s `ContextVar`, which `api_key_authorized_factory()`/`cookie_authorized_factory()` (in `src/security/validation/`) populate as soon as a caller's credential is validated for the request. Because it's a `ContextVar`, the value is isolated per request/asyncio task and never leaks across concurrent requests. CRUD writes made outside a request (e.g. a one-off script) still get logged, just with `user_id`/`api_key_id` left as `None`.
 
 **Update:** the `auth_cookies` caching gap this section originally flagged has been closed. [`_resolve_cookie_row()`](../src/security/validation/cookie_security.py) checks Redis first via `get_cached_permission_json`/`cache_permission_json`, falling back to Postgres only on a cache miss, removing the per-request Postgres round-trip the original design had. Every write path that changes a cookie's validity — add, revoke, refresh/rotate, and both the periodic and bulk expiry sweeps — invalidates the cache through `invalidate_cookie_cache()` in [`cache_invalidation.py`](../src/models/crud/cache_invalidation.py). **One thing to know if you build on this:** the cached payload is a plain `dict`, not the `AuthCookie` ORM object — consumers must use dict access (`row["revoked"]`, not `row.revoked`) and parse `expires_at` back from its ISO-format string with `datetime.fromisoformat(...)` before comparing it to the current time.
 

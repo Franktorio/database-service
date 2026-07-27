@@ -4,6 +4,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.database import with_session
 from src.models.crud.cache_invalidation import cache_invalidating, invalidate_user_cache
+from src.models.crud.system.audit_log_crud import audit_logged
 from src.models.crud.system.auth_cookie_crud import delete_auth_cookies_by_username
 from src.models.tables.system.user_table import User
 from src.services.system.logging import log_message
@@ -23,6 +24,7 @@ async def _invalidate_after_user_write(result, *args, **kwargs) -> None:
             await invalidate_user_cache(username)
 
 
+@audit_logged("user.create")
 @cache_invalidating(_invalidate_after_user_write)
 @with_session
 async def add_user(
@@ -80,6 +82,7 @@ async def get_user_by_username(username: str, session: AsyncSession | None = Non
     return user
 
 
+@audit_logged("user.update")
 @cache_invalidating(_invalidate_after_user_write)
 @with_session
 async def update_user(
@@ -146,6 +149,7 @@ async def update_user(
     return user
 
 
+@audit_logged("user.delete")
 @cache_invalidating(_invalidate_after_user_write)
 @with_session
 async def delete_user(username: str, session: AsyncSession | None = None) -> bool:
@@ -161,6 +165,7 @@ async def delete_user(username: str, session: AsyncSession | None = None) -> boo
     return deleted
 
 
+@audit_logged("user.password_update")
 @cache_invalidating(_invalidate_after_user_write)
 @with_session
 async def update_user_password(
@@ -191,7 +196,7 @@ async def update_user_password(
     return user
 
 
-@cache_invalidating
+@audit_logged("user.login_rate_limit_update")
 @cache_invalidating(_invalidate_after_user_write)
 @with_session
 async def update_user_login_rate_limit(

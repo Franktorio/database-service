@@ -7,6 +7,7 @@ from src.api.config import COOKIE_JWT_INDEX
 from src.api.errors import api_error
 from src.api.models import CookieRequestData
 from src.services.system.logging import log_message_for_ip
+from src.models.crud.audit_context import set_audit_actor
 from src.models.crud.cache_invalidation import cookie_identifier, user_identifier
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.models.crud.system.user_crud import get_user_by_username
@@ -227,6 +228,7 @@ async def get_current_cookie_data(
 
     return CookieRequestData(
         username=username,
+        user_id=cookie_row["user_id"],
         role=effective_role,
         token_hash=token_hash[:12],
         rate_limit=COOKIE_DEFAULT_RATE_LIMIT,
@@ -238,7 +240,9 @@ def cookie_authorized_factory(required_roles: set[str] | None = None):
 
     Depends chain: get_cookie_claims (decode/shape) -> cookie_rate_limited (per-token rate limit)
     -> get_current_cookie_data (DB validity + permissions) -> this (role check).
-    On success, the resolved `CookieRequestData` is stashed on `request.state.cookie_data`.
+    On success, the resolved `CookieRequestData` is stashed on `request.state.cookie_data`, and the caller's
+    identity is recorded as the current audit-log actor (see audit_context.py) for any CRUD writes made later
+    in the same request.
     """
     normalized_roles = {role.lower() for role in (required_roles or set())}
 
@@ -259,6 +263,7 @@ def cookie_authorized_factory(required_roles: set[str] | None = None):
             raise api_error(403, "Insufficient role.")
 
         request.state.cookie_data = cookie_data
+        set_audit_actor(user_id=cookie_data.user_id, ip_address=extract_client_ip(request))
         return cookie_data
 
     return cookie_authorized

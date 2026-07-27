@@ -6,6 +6,7 @@ from src.api.config import PERM_LEVEL_MAP
 from src.api.errors import api_error
 from src.api.models import APIRequestData
 from src.services.system.logging import log_message_for_ip
+from src.models.crud.audit_context import set_audit_actor
 from src.models.crud.cache_invalidation import api_key_identifier
 from src.models.crud.system.api_key_crud import get_api_key
 from src.models.tables.system.api_key_table import ApiKey
@@ -33,6 +34,7 @@ PRINT_PREFIX = "API AUTH"
 def _to_permission_payload(api_key: ApiKey) -> dict:
     """Converts an ApiKey object to a dictionary payload for caching and validation."""
     return {
+        "id": api_key.id,
         "key_hash": api_key.key_hash,
         "permission_level": api_key.permission_level,
         "rate_limit": api_key.rate_limit,
@@ -42,12 +44,14 @@ def _to_permission_payload(api_key: ApiKey) -> dict:
     
 def _to_api_key_object(payload: dict) -> ApiKey:
     """Converts a dictionary payload back to an ApiKey object."""
-    return ApiKey(
+    api_key = ApiKey(
         key_hash=payload.get("key_hash", ""),
         permission_level=payload.get("permission_level", 0),
         rate_limit=payload.get("rate_limit", 1),
         email=payload.get("email", ""),
     )
+    api_key.id = payload.get("id")
+    return api_key
 
 
 def to_api_request_data(api_key: ApiKey) -> APIRequestData:
@@ -158,7 +162,9 @@ def api_key_authorized_factory(permission_level: int, too_soon_window_seconds: i
     """Factory to create a dependency that checks for the required permission level.
 
     Depends chain: get_current_api_key (exists?) -> api_key_rate_limited (own rate limit) -> this (permission level).
-    On success, the resolved `APIRequestData` is stashed on `request.state.api_data` for handlers/logging that want it.
+    On success, the resolved `APIRequestData` is stashed on `request.state.api_data` for handlers/logging that want it,
+    and the caller's identity is recorded as the current audit-log actor (see audit_context.py) for any CRUD writes
+    made later in the same request.
     """
     dependency = api_key_rate_limited_factory(too_soon_window_seconds)
 
@@ -171,6 +177,7 @@ def api_key_authorized_factory(permission_level: int, too_soon_window_seconds: i
             log_message_for_ip(ip_address, "Insufficient permissions.", PRINT_PREFIX, level="WARNING")
             raise api_error(403, "Insufficient permissions.")
         request.state.api_data = to_api_request_data(api_key)
+        set_audit_actor(api_key_id=api_key.id, ip_address=extract_client_ip(request))
         return api_key
 
     return api_key_authorized

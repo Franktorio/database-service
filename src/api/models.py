@@ -26,6 +26,7 @@ class CookieRequestData(BaseModel):
     """Data model for cookie request data which is injected into the request context."""
     
     username: str = Field(..., description="Username extracted from the cookie.")
+    user_id: int | None = Field(default=None, description="User id extracted from the cookie's tracked row.")
     role: str = Field(..., description="Role extracted from the cookie.")
     token_hash: str = Field(..., description="Token hash extracted from the cookie.")
     rate_limit: int = Field(..., description="Rate limit extracted from the cookie.")

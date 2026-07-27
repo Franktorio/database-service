@@ -1,3 +1,5 @@
+# ~/src/models/tables/system/auth_cookie_table.py
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, func

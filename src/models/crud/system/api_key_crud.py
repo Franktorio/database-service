@@ -4,6 +4,7 @@ from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.database import with_session
 from src.models.crud.cache_invalidation import cache_invalidating, invalidate_api_key_cache
+from src.models.crud.system.audit_log_crud import audit_logged
 from src.models.tables.system.api_key_table import ApiKey
 from src.services.system.logging import log_message
 
@@ -22,6 +23,7 @@ async def _invalidate_after_api_key_write(result, *args, **kwargs) -> None:
             await invalidate_api_key_cache(key_hash)
 
 
+@audit_logged("api_key.create")
 @cache_invalidating(_invalidate_after_api_key_write)
 @with_session
 async def add_api_key(
@@ -60,6 +62,7 @@ async def get_api_keys(session: AsyncSession | None = None) -> list[ApiKey]:
 
     return api_keys
 
+@audit_logged("api_key.delete")
 @with_session
 async def delete_api_key_by_id(key_id: int, session: AsyncSession | None = None) -> bool:
     """Delete an API key by its internal (opaque, public) id."""
@@ -75,6 +78,7 @@ async def delete_api_key_by_id(key_id: int, session: AsyncSession | None = None)
     return True
 
 
+@audit_logged("api_key.update")
 @cache_invalidating(_invalidate_after_api_key_write)
 @with_session
 async def update_api_key_by_id(
