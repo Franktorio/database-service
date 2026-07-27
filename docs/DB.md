@@ -16,14 +16,14 @@ Database runtime is implemented with async SQLAlchemy over asyncpg.
 Current behavior in practice:
 
 - Engine is created once in src/models/database.py with postgresql+asyncpg.
-- Connection pooling uses NullPool, so every session checkout opens a fresh DB connection and closes on return.
+- Connection pooling uses SQLAlchemy's default async pool with configured size, overflow, timeout, recycle, and pre-ping settings.
 - Session factory is async_sessionmaker with expire_on_commit=False.
 - SQL echo is enabled only when OPERATING_MODE is development.
 - Schema changes are managed through Alembic revisions under migrations/versions; runtime init only verifies connectivity.
 
 Operational implications:
 
-- NullPool simplifies lifecycle and avoids stale pooled sockets, but increases connection churn under load.
+- The configured pool trades off reuse, capacity, and liveness checks via pool_size, max_overflow, pool_timeout, pool_recycle, and pool_pre_ping.
 - With frequent short DB operations (auth checks), per-request connect/disconnect overhead is non-trivial.
 - Because expire_on_commit=False, ORM instances remain usable after commit without implicit refresh. This improves endpoint ergonomics, but stale-field assumptions can slip into multi-step flows if code reuses old objects.
 
@@ -33,10 +33,10 @@ The startup design now combines a readiness gate with FastAPI lifespan-managed a
 
 Observed sequence:
 
-- main.py creates a DBReadySignal and starts the backup thread with that signal.
+- main.py creates a DBReadySignal and starts the API server.
 - API server starts via Uvicorn.
 - FastAPI lifespan startup calls init_db().
-- Lifespan then starts enabled async tasks such as healthcheck and cookie-expiry on the same event loop.
+- Lifespan then starts enabled async tasks such as backup, healthcheck, and cookie-expiry on the same event loop.
 - DBReadySignal is set ready after DB initialization, allowing backup loop startup.
 
 What this fixes:
@@ -47,7 +47,7 @@ What this fixes:
 Residual caveat:
 
 - DBReadySignal is in-process memory only. This is fine for single-process operation but not meaningful across multiple worker processes or hosts.
-- Service lifecycle is still mixed: backup remains thread-based while other maintenance services are loop-managed.
+- Service lifecycle is still mixed only in the sense that backup, healthcheck, and cookie-expiry are all app-managed async tasks that share the API process event loop.
 
 ## Schema Initialization Semantics
 
@@ -260,7 +260,7 @@ Why this matters:
 Current DB design assumptions are single-node and moderate load:
 
 - Ratelimiter counters are Redis-backed; some resolver/block metadata remains process-local.
-- NullPool favors correctness simplicity over high-throughput connection reuse.
+- The SQLAlchemy async pool settings favor predictable reuse and bounded growth over unbounded connection churn.
 - Auth paths include both read and write DB activity (especially with persistent logs enabled).
 
 Scaling caveat:

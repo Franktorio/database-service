@@ -37,10 +37,9 @@ Important index coverage:
 Startup flow today:
 
 1. Logging is initialized in `main.py`.
-2. Backup daemon thread is started and waits for DB ready signal.
-3. Uvicorn starts the FastAPI app.
-4. During API lifespan startup, the app verifies DB connectivity.
-5. Async service loops (DB healthcheck and cookie expiry) start as FastAPI lifespan tasks on the same event loop when enabled.
+2. Uvicorn starts the FastAPI app.
+3. During API lifespan startup, the app verifies DB connectivity.
+4. Async service loops (backup, DB healthcheck, and cookie expiry when enabled) start as FastAPI lifespan tasks on the same event loop.
 
 Primary code areas:
 
@@ -300,7 +299,7 @@ These are current design realities, not aspirational behavior:
 - Ratelimits and IP blocks are Redis-backed, but they still depend on Redis availability and TTL alignment.
 - Background services are supervised asyncio tasks rather than daemon threads.
 - SQL echo is enabled only in development mode.
-- The DB engine uses `NullPool`, which limits connection reuse.
+- The DB engine uses SQLAlchemy's pooled async engine with configured size/timeouts, so connection reuse depends on those pool settings.
 - Healthcheck/restore still requires production hardening before enabling automatic recovery.
 
 ## Documentation
