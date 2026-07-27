@@ -256,6 +256,39 @@ This repository is currently optimized for a single-node Linux deployment. The i
 
 Reverse-proxy deployments should be configured carefully: trusted forwarding headers are only honored when the peer IP is listed in `TRUSTED_PROXIES`.
 
+If you split the system into dedicated nodes, keep the same `config/.env` values on every node so the API, PostgreSQL, and Redis services all point at the same shared endpoints.
+
+### Common Node Profiles
+
+API node:
+
+- Run `python3 main.py`.
+- Keep `API_ENABLED=true`.
+- Enable only the background services you actually want on that node.
+- For a lean API-only node, set these in `config/service_config.json`:
+  - `backup.enabled=false`
+  - `dbhealthchecker.enabled=false`
+  - `cookie_expiry.enabled=false`
+  - `ratelimit_cache.enabled=false`
+  - `ip_block_cache.enabled=false`
+
+PostgreSQL node:
+
+- Install PostgreSQL and run `python3 -m tools.scripts.setup_postgres`.
+- Keep the database-related `POSTGRESQL_*` values the same as the API node expects.
+- Do not enable the API runtime services on this node unless you also run the application there.
+
+Redis node:
+
+- Install Redis and run `python3 -m tools.scripts.setup_redis`.
+- Keep the Redis connection values in `config/.env` aligned with the API node.
+- Do not enable the API runtime services on this node unless you also run the application there.
+
+Combined single-node deployment:
+
+- Leave the default service flags enabled if you want the full all-in-one setup.
+- This mode is the simplest option when PostgreSQL and Redis are local to the same machine as the API.
+
 ## Known Limitations
 
 These are current design realities, not aspirational behavior:

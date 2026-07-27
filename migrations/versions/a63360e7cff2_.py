@@ -1,8 +1,8 @@
-"""initial schema
+"""empty message
 
-Revision ID: 4db5b70971c6
+Revision ID: a63360e7cff2
 Revises: 
-Create Date: 2026-07-26 05:06:16.770811
+Create Date: 2026-07-27 04:30:18.291463
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '4db5b70971c6'
+revision: str = 'a63360e7cff2'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -33,16 +33,6 @@ def upgrade() -> None:
     sa.UniqueConstraint('key_hash')
     )
     op.create_index(op.f('ix_api_keys_created_at'), 'api_keys', ['created_at'], unique=False)
-    op.create_table('persistent_logs',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('log_type', sa.Enum('REQUEST', 'API AUTH', 'USER AUTH', 'API RATE LIMIT', 'USER RATE LIMIT', 'IP BLOCK', native_enum=False), nullable=False),
-    sa.Column('log_level', sa.Enum('INFO', 'WARNING', 'ERROR', 'DEBUG', native_enum=False), nullable=False),
-    sa.Column('message', sa.String(), nullable=False),
-    sa.Column('ip_address', sa.String(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('ix_persistent_logs_created_at', 'persistent_logs', ['created_at'], unique=False)
     op.create_table('users',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('username', sa.String(), nullable=False),
@@ -85,8 +75,6 @@ def downgrade() -> None:
     op.drop_index('ix_auth_cookies_expires_at_revoked', table_name='auth_cookies')
     op.drop_table('auth_cookies')
     op.drop_table('users')
-    op.drop_index('ix_persistent_logs_created_at', table_name='persistent_logs')
-    op.drop_table('persistent_logs')
     op.drop_index(op.f('ix_api_keys_created_at'), table_name='api_keys')
     op.drop_table('api_keys')
     # ### end Alembic commands ###
