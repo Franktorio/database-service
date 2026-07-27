@@ -1,8 +1,9 @@
 
-from fastapi import HTTPException, Depends, Request
+from fastapi import Depends, Request
 
 from config.loader import RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import PERM_LEVEL_MAP
+from src.api.errors import api_error
 from src.api.models import APIRequestData
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.cache_invalidation import api_key_identifier
@@ -111,20 +112,17 @@ async def get_current_api_key(
     ip_address = extract_client_ip(request)
     if not key_hash:
         log_message_for_ip(ip_address, "Missing or invalid Authorization header.", PRINT_PREFIX, level="WARNING")
-        raise HTTPException(
-            status_code=401,
-            detail="Missing or invalid Authorization header. Expected: Bearer <api_key>",
-        )
+        raise api_error(401, "Missing or invalid Authorization header. Expected: Bearer <api_key>")
 
     try:
         permission_payload = await _get_api_permission_payload(key_hash)
     except PermissionServiceUnavailable:
         log_message_for_ip(ip_address, "Authorization cache unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
-        raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
+        raise api_error(503, "Authorization cache unavailable.")
 
     if permission_payload is None:
         log_message_for_ip(ip_address, "API key is not registered.", PRINT_PREFIX, level="WARNING")
-        raise HTTPException(status_code=403, detail="API key is not registered.")
+        raise api_error(403, "API key is not registered.")
 
     return _to_api_key_object(permission_payload)
 
@@ -146,14 +144,11 @@ def api_key_rate_limited_factory(too_soon_window_seconds: int | None = None):
             )
         except (RateLimitServiceUnavailable, PermissionServiceUnavailable):
             log_message_for_ip(ip_address, "Authorization cache unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
-            raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
+            raise api_error(503, "Authorization cache unavailable.")
 
         if not allowed:
             log_message_for_ip(ip_address, f"Rate limit exceeded. Retry after {retry_after} seconds.", PRINT_PREFIX, level="WARNING")
-            raise HTTPException(
-                status_code=429,
-                detail={"error": "Rate limit exceeded.", "retry_after": retry_after},
-            )
+            raise api_error(429, "Rate limit exceeded.", retry_after)
         return api_key
 
     return api_key_rate_limited
@@ -174,7 +169,7 @@ def api_key_authorized_factory(permission_level: int, too_soon_window_seconds: i
         if api_key.permission_level < permission_level:
             ip_address = extract_client_ip(request)
             log_message_for_ip(ip_address, "Insufficient permissions.", PRINT_PREFIX, level="WARNING")
-            raise HTTPException(status_code=403, detail="Insufficient permissions.")
+            raise api_error(403, "Insufficient permissions.")
         request.state.api_data = to_api_request_data(api_key)
         return api_key
 

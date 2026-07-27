@@ -5,6 +5,7 @@ from fastapi import Depends, Request
 from src.api.system.api_db_endpoints.routes.router import router
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
+from src.api.system.api_db_endpoints.models import ApiKeyListResponse
 from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.models.crud.system.api_key_crud import get_api_keys
@@ -12,7 +13,7 @@ from src.models.tables.system.api_key_table import ApiKey
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
-@router.get("")
+@router.get("", response_model=ApiKeyListResponse, response_model_exclude_none=True)
 @with_ip_block
 async def list_api_keys(request: Request, api_key: ApiKey = Depends(require_super_admin)):
     api_keys = await get_api_keys()

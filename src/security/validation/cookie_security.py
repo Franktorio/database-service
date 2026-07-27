@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request
 
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
+from src.api.errors import api_error
 from src.api.models import CookieRequestData
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.cache_invalidation import cookie_identifier, user_identifier
@@ -100,22 +101,22 @@ async def get_cookie_claims(
     client_ip = extract_client_ip(request)
     if not cookie_token:
         log_message_for_ip(client_ip, "Missing cookie token.", PRINT_PREFIX, level="WARNING")
-        raise HTTPException(status_code=401, detail="Missing cookie token.")
+        raise api_error(401, "Missing cookie token.")
 
     token_payload = decode_jwt_token(cookie_token)
     if token_payload is None:
         log_message_for_ip(client_ip, "Cookie authentication failed: invalid JWT payload", PRINT_PREFIX, level="WARNING")
-        raise HTTPException(status_code=401, detail="Invalid cookie token.")
+        raise api_error(401, "Invalid cookie token.")
 
     username_claim = token_payload.get("username")
     if not isinstance(username_claim, str) or not username_claim.strip():
         log_message_for_ip(client_ip, "Cookie authentication failed: missing username claim", PRINT_PREFIX, level="WARNING")
-        raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
+        raise api_error(401, "Invalid cookie token payload.")
 
     user_id_claim = token_payload.get("user_id")
     if user_id_claim is not None and not isinstance(user_id_claim, int):
         log_message_for_ip(client_ip, "Cookie authentication failed: invalid user_id claim", PRINT_PREFIX, level="WARNING")
-        raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
+        raise api_error(401, "Invalid cookie token payload.")
 
     return {
         "username": username_claim,
@@ -137,7 +138,7 @@ def cookie_rate_limited_factory():
             allowed, retry_after = await _ensure_cookie_ratelimit(token_hash)
         except RateLimitServiceUnavailable:
             log_message_for_ip(client_ip, "Cookie rate limiter unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
-            raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
+            raise api_error(503, "Rate limiter service unavailable.")
 
         if not allowed:
             log_message_for_ip(
@@ -146,10 +147,7 @@ def cookie_rate_limited_factory():
                 PRINT_PREFIX,
                 level="WARNING",
             )
-            raise HTTPException(
-                status_code=429,
-                detail={"error": "Rate limit exceeded.", "retry_after": retry_after},
-            )
+            raise api_error(429, "Rate limit exceeded.", retry_after)
         return claims
 
     return cookie_rate_limited
@@ -173,7 +171,7 @@ async def get_current_cookie_data(
             PRINT_PREFIX,
             level="WARNING",
         )
-        raise HTTPException(status_code=401, detail="Cookie token is not registered.")
+        raise api_error(401, "Cookie token is not registered.")
     if cookie_row["revoked"]:
         log_message_for_ip(
             client_ip,
@@ -181,7 +179,7 @@ async def get_current_cookie_data(
             PRINT_PREFIX,
             level="WARNING",
         )
-        raise HTTPException(status_code=401, detail="Cookie token has been revoked.")
+        raise api_error(401, "Cookie token has been revoked.")
 
     cookie_expires_at = datetime.fromisoformat(cookie_row["expires_at"]) if cookie_row["expires_at"] else None
     if cookie_expires_at is None or cookie_expires_at <= datetime.now(timezone.utc):
@@ -191,22 +189,22 @@ async def get_current_cookie_data(
             PRINT_PREFIX,
             level="WARNING",
         )
-        raise HTTPException(status_code=401, detail="Cookie token has expired.")
+        raise api_error(401, "Cookie token has expired.")
 
     username = cookie_row["username"]
     if username != username_claim:
         log_message_for_ip(client_ip, "Cookie authentication failed: username claim mismatch.", PRINT_PREFIX, level="WARNING")
-        raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
+        raise api_error(401, "Invalid cookie token payload.")
 
     if user_id_claim is not None and cookie_row["user_id"] != user_id_claim:
         log_message_for_ip(client_ip, "Cookie authentication failed: user_id claim mismatch.", PRINT_PREFIX, level="WARNING")
-        raise HTTPException(status_code=401, detail="Invalid cookie token payload.")
+        raise api_error(401, "Invalid cookie token payload.")
 
     try:
         permissions = await _resolve_user_permissions(username)
     except PermissionServiceUnavailable:
         log_message_for_ip(client_ip, "User permissions cache unavailable.", PRINT_PREFIX, level="ERROR")
-        raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
+        raise api_error(503, "Authorization cache unavailable.")
 
     if permissions is None:
         log_message_for_ip(
@@ -215,7 +213,7 @@ async def get_current_cookie_data(
             PRINT_PREFIX,
             level="WARNING",
         )
-        raise HTTPException(status_code=401, detail="User no longer exists.")
+        raise api_error(401, "User no longer exists.")
 
     roles = permissions.get("roles") or []
     effective_role = str(permissions.get("role") or (roles[0] if roles else "")).lower()
@@ -258,7 +256,7 @@ def cookie_authorized_factory(required_roles: set[str] | None = None):
                 PRINT_PREFIX,
                 level="WARNING",
             )
-            raise HTTPException(status_code=403, detail="Insufficient role.")
+            raise api_error(403, "Insufficient role.")
 
         request.state.cookie_data = cookie_data
         return cookie_data

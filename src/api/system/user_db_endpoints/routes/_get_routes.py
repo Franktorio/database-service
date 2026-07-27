@@ -1,6 +1,8 @@
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL
+from src.api.errors import api_error
+from src.api.system.user_db_endpoints.models import UserListResponse, UserResponse
 from src.api.system.user_db_endpoints.routes.router import router
 from src.models.crud.system.user_crud import get_user_by_username, get_users
 from src.security.validation.api_security import api_key_authorized_factory
@@ -10,7 +12,7 @@ from src.models.tables.system.api_key_table import ApiKey
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
 
-@router.get("")
+@router.get("", response_model=UserListResponse, response_model_exclude_none=True)
 @with_ip_block
 async def list_users(request: Request, api_key: ApiKey = Depends(require_super_admin)):
     users = await get_users()
@@ -36,12 +38,12 @@ async def list_users(request: Request, api_key: ApiKey = Depends(require_super_a
     }
 
 
-@router.get("/{username}")
+@router.get("/{username}", response_model=UserResponse)
 @with_ip_block
 async def get_user(username: str, request: Request, api_key: ApiKey = Depends(require_super_admin)):
     user = await get_user_by_username(username)
     if user is None:
-        raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
+        raise api_error(404, f"User '{username}' not found.")
 
     return {
         "user": {

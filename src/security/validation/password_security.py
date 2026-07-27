@@ -1,9 +1,8 @@
 # ~/src/security/password_security.py
 # Decorator orchestrator for password validation and rate limiting.
 
-from fastapi import HTTPException
-
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
+from src.api.errors import api_error
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.cache_invalidation import password_identifier, user_identifier
 from src.models.crud.system.user_crud import get_user_by_username
@@ -77,27 +76,24 @@ async def authenticate_password(username: str, password: str, ip_address: str) -
         allowed, status = await _enforce_password_ratelimit(username, configured_limit)
     except PermissionServiceUnavailable:
         log_message_for_ip(ip_address, "User permissions cache unavailable.", "PASSWORD SECURITY", level="ERROR")
-        raise HTTPException(status_code=503, detail="Authorization cache unavailable.")
+        raise api_error(503, "Authorization cache unavailable.")
     except RateLimitServiceUnavailable:
         log_message_for_ip(ip_address, "Password rate limiter unavailable: Redis is not reachable.", "PASSWORD SECURITY", level="ERROR")
-        raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
+        raise api_error(503, "Rate limiter service unavailable.")
 
     if not allowed:
         log_message_for_ip(ip_address, f"Password rate limit exceeded for username={username}. retry_after={status:.2f}s", "PASSWORD SECURITY", level="WARNING")
-        raise HTTPException(
-            status_code=429,
-            detail={"error": "Password rate limit exceeded.", "retry_after": status},
-        )
+        raise api_error(429, "Password rate limit exceeded.", status)
 
     user = await get_user_by_username(username)
     if user is None:
         log_message_for_ip(ip_address, f"Password authentication failed: unknown username={username}", "PASSWORD SECURITY", level="WARNING")
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
+        raise api_error(401, "Invalid username or password.")
 
     result = await verify_password(password, user.password_hash, salt=user.password_salt, iterations=user.hash_iterations)
     if not result:
         log_message_for_ip(ip_address, f"Password authentication failed: invalid password for username={username}", "PASSWORD SECURITY", level="WARNING")
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
+        raise api_error(401, "Invalid username or password.")
 
     log_message_for_ip(ip_address, f"Password authentication accepted for username={username}", "PASSWORD SECURITY", level="INFO")
 
@@ -108,7 +104,7 @@ async def auth_and_grant_token(username: str, password: str, ip_address: str, ex
     user = await authenticate_password(username, password, ip_address)
     
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
+        raise api_error(401, "Invalid username or password.")
 
     token = await create_cookie_token(
         username=user.username,

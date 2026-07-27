@@ -6,7 +6,6 @@
 
 import time
 from functools import wraps
-from fastapi import HTTPException
 
 from config.loader import (
     IP_BLOCKING_DURATION,
@@ -16,6 +15,7 @@ from config.loader import (
     REDIS_IP_BLOCK_EX_SECONDS,
     TRUSTED_PROXIES,
 )
+from src.api.errors import api_error
 from src.security.extract import extract_client_ip, extract_request_from_call
 from src.models.crud.cache_invalidation import ip_block_identifier
 from src.services.system.cache.ratelimitcache import (
@@ -73,7 +73,7 @@ def with_ip_block(func):
                     result = await process_request(ip_block_identifier(ip_address))
             except RateLimitServiceUnavailable:
                 log_message_for_ip(ip_address, "IP block rate limiter unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
-                raise HTTPException(status_code=503, detail="Rate limiter service unavailable.")
+                raise api_error(503, "Rate limiter service unavailable.")
 
             if result in (DENIED, TOO_SOON):
                 newly_blocked = True
@@ -103,10 +103,7 @@ def with_ip_block(func):
                     PRINT_PREFIX,
                     level="WARNING",
                 )
-            raise HTTPException(
-                status_code=429,
-                detail={"error": "IP temporarily blocked.", "retry_after": blocked_retry_after},
-            )
+            raise api_error(429, "IP temporarily blocked.", blocked_retry_after)
 
         return await func(*args, **kwargs)
 

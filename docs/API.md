@@ -84,6 +84,7 @@ If Redis is unreachable, both layers **fail closed**: the request receives `503 
   ```json
   { "message": "API key is valid: api_key_fingerprint=... permission_level=... permission_name=... rate_limit=..." }
   ```
+- **Errors:** `401` missing/invalid key, `403` insufficient permission/unregistered key, `429` rate limited, `503` Redis unavailable — all as `{"detail": {"error": "...", "retry_after": ...}}`.
 
 ### `POST /login-auth-test` *(test route — gated by `API_EXPOSE_TEST_ENDPOINTS`)*
 
@@ -280,6 +281,10 @@ Deletes the user and cascades to all of their auth cookies.
 
 ---
 
+> **Standardized error envelope:** every error response raised by this API uses `detail: {"error": "<message>", "retry_after": <seconds-or-null>}` — see [`src/api/errors.py`](../src/api/errors.py)'s `api_error()` helper, used by every route and security dependency instead of raw `HTTPException(...)`. A single client-side handler can always read `response.json()["detail"]["error"]` and optionally `["retry_after"]` (non-`null` only for `429`s), regardless of which layer raised the exception.
+
+> **Typed responses:** every route below declares a `response_model=` (see each endpoint folder's `models.py`, e.g. [`api_db_endpoints/models.py`](../src/api/system/api_db_endpoints/models.py), [`user_db_endpoints/models.py`](../src/api/system/user_db_endpoints/models.py)), so response shapes are validated by FastAPI/Pydantic and documented in the OpenAPI schema — not just hand-built dicts.
+
 ## Error reference
 
 | Status | Meaning | Where it comes from |
@@ -292,4 +297,4 @@ Deletes the user and cascades to all of their auth cookies.
 | `429` | Rate limit exceeded (per-identity) or IP temporarily blocked (burst detection) | `with_ip_block`, `api_key_authorized_factory`, `cookie_authorized_factory`, `authenticate_password` |
 | `503` | Redis unavailable — auth/rate-limit/permission cache could not be evaluated | Any route wrapped by `with_ip_block` or gated by the auth dependencies |
 
-> **Known inconsistency** (see [Engineering Report §4](ENGINEERING_REPORT.md#4-api-design)): most `4xx` errors use a plain string `detail`, while `429` responses use a structured `detail: {"error": "...", "retry_after": <seconds>}`. Handle both shapes defensively until this is unified.
+> Every error `detail` is a `{"error": "...", "retry_after": ...}` object (see the standardized error envelope note above) — `retry_after` is `null` except on `429` responses.

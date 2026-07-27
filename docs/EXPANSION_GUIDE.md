@@ -189,7 +189,18 @@ class NoteResponse(BaseModel):
     body: str
 ```
 
-Unlike the existing `system` routes (which hand-build response dicts), **use `response_model=` on your routes** (see next step) — this is a concrete improvement flagged in the [Engineering Report](ENGINEERING_REPORT.md#4-api-design) that new code should adopt going forward even though existing `system` routes don't yet.
+**Use `response_model=` on your routes** (see next step), exactly as every existing `system` route now does — this is required for FastAPI to validate and document your response shape rather than leaving it as a hand-built untyped dict. Add your response models (and request models) to your feature's own `models.py`, following the pattern in [`api_db_endpoints/models.py`](../src/api/system/api_db_endpoints/models.py)/[`user_db_endpoints/models.py`](../src/api/system/user_db_endpoints/models.py).
+
+For error responses, reuse [`api_error()`](../src/api/errors.py) instead of raising a bare `HTTPException(...)`:
+
+```python
+from src.api.errors import api_error
+
+if note is None:
+    raise api_error(404, "Note not found.")
+```
+
+This keeps every error response on the same envelope shape (`detail: {"error": "...", "retry_after": <seconds-or-null>}`) that the rest of the API already uses — don't reintroduce a plain-string `detail` for new routes.
 
 ## Step 5 — Write routes and reuse existing auth
 
