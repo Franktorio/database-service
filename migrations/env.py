@@ -34,6 +34,10 @@ SYNC_DATABASE_URL = DATABASE_URL.replace(
     "postgresql+psycopg2://",
 )
 
+# Commands
+# alembic revision --autogenerate -m "message"
+# alembic upgrade head
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
