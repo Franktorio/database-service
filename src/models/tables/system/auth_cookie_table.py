@@ -4,9 +4,6 @@ from sqlalchemy import DateTime, ForeignKey, Index, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.base import Base
-from src.services.system.logging import log_message
-
-PRINT_PREFIX = "AUTH COOKIE TABLE"
 
 
 class AuthCookie(Base):
@@ -35,6 +32,3 @@ class AuthCookie(Base):
         server_default=func.now(),
         init=False,
     )
-
-
-log_message(f"[DEBUG] [{PRINT_PREFIX}] AuthCookie model registered.")

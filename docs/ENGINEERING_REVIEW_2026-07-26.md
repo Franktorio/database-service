@@ -125,7 +125,7 @@ If deployed as-is on a single VPS, it can serve moderate internal/admin workload
 **What is below industry standards**
 
 - Inconsistency between comments/docs and runtime behavior.
-- Some low-signal logging and large string formatting overhead despite log filtering.
+- Some low-signal logging and large string formatting overhead; the code now trims noisy call sites instead of keyword-filtering logs centrally.
 - A few quality smells from partially integrated modules and drift.
 
 **What a senior engineer would likely change**
@@ -138,7 +138,7 @@ If deployed as-is on a single VPS, it can serve moderate internal/admin workload
 
 **Concrete examples**
 
-- Logging filter suppresses most informational logs unless prefixed as abuse/error: `src/services/system/logging.py`
+- Logging now passes through all queued messages; routine info/debug call sites were reduced in the service and API layers: `src/services/system/logging.py`
 - Docs drift vs implementation (example response shapes and architecture claims): `docs/API.md`, `README.md`
 - Temporary CRUD file in tracked source path: `src/models/crud/system/persistent_logs_crud.py.temp`
 

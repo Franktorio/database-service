@@ -8,17 +8,12 @@ from src.models.crud.system.user_crud import add_user, get_user_by_username
 from src.security.validation.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
-from src.services.system.logging import log_message
-
-PRINT_PREFIX = "POST USER DB ROUTES"
 
 
 @router.post("")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def create_user(request: Request, model: UserCreateRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user create request for username {model.username}.")
-
     existing_user = await get_user_by_username(model.username)
     if existing_user is not None:
         raise HTTPException(status_code=409, detail=f"User '{model.username}' already exists.")

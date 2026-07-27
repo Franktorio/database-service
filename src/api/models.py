@@ -2,9 +2,6 @@
 # Shared API request models.
 
 from pydantic import BaseModel, Field
-from src.services.system.logging import log_message
-
-PRINT_PREFIX = "API MODELS"
 
 class JWTRequestBase(BaseModel):
     """Base class for all JWT request models."""
@@ -32,7 +29,5 @@ class CookieRequestData(BaseModel):
     role: str = Field(..., description="Role extracted from the cookie.")
     token_hash: str = Field(..., description="Token hash extracted from the cookie.")
     rate_limit: int = Field(..., description="Rate limit extracted from the cookie.")
-
-log_message(f"[DEBUG] [{PRINT_PREFIX}] Base request model loaded.")
 
 

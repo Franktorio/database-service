@@ -6,9 +6,6 @@ from sqlalchemy import func, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.base import Base
-from src.services.system.logging import log_message
-
-PRINT_PREFIX = "API KEY TABLE"
 
 class ApiKey(Base):
     __tablename__ = "api_keys"
@@ -32,6 +29,3 @@ class ApiKey(Base):
         index=True,
         init=False,
     )
-
-
-log_message(f"[DEBUG] [{PRINT_PREFIX}] ApiKey model registered.")

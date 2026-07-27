@@ -67,7 +67,7 @@ Nitpicky notes:
 
 - create_all is additive and non-destructive; it does not handle column renames, type rewrites, constraint rewrites, or data backfills.
 - There is no schema version table or migration history ledger.
-- init_db currently logs a debug message that reads as if echo is enabled, even though echo is conditional by operating mode.
+- init_db now does a simple connectivity check and emits only a single startup info log.
 
 ## Current Tables
 

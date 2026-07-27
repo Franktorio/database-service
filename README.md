@@ -243,11 +243,12 @@ python3 -m tools.scripts.apply_backup <backup_file_path>
 
 ## Logging
 
-- Console logging plus daily-rotated file logging.
+- Console logging plus daily-rotated file logging through the shared logger in `src/services/system/logging.py`.
+- Routine info/debug chatter is intentionally minimized in startup, request, and CRUD paths.
 - Active file: `logs/db_service_logs.log`.
 - Rotation: midnight.
 - Retention: 7 rotated files.
-- Development mode enables debug-level output.
+- Development mode still enables debug-level output, but the codebase now uses that level more sparingly.
 
 ## Deployment Notes
 

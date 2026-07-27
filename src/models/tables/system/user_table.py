@@ -7,9 +7,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import String, ARRAY
 
 from src.models.base import Base
-from src.services.system.logging import log_message
-
-PRINT_PREFIX = "USER TABLE"
 
 class User(Base):
     __tablename__ = "users"
@@ -53,7 +50,3 @@ class User(Base):
     @role.setter
     def role(self, value: str) -> None:
         self.roles = [value] if value else []
-    
-
-
-log_message(f"[DEBUG] [{PRINT_PREFIX}] User model registered.")

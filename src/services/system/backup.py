@@ -41,7 +41,6 @@ def _get_last_backup():
         backups,
         key=lambda p: p.stat().st_mtime
     )
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Latest backup detected: {latest_backup.name}")
     return latest_backup
 
 
@@ -56,7 +55,6 @@ async def _create_backup() -> bool:
     )
 
     backup_file = BACKUP_DIR / f"backup_{timestamp}.sql"
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Running pg_dump for backup target {backup_file}")
 
     command = [
         "pg_dump",
@@ -114,14 +112,10 @@ def _cleanup() -> None:
     for old in backups[RETENTION:]:
         old.unlink()
 
-        log_message(f"[INFO] [{PRINT_PREFIX}] Removed {old.name}")
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Cleanup completed with retention={RETENTION}.")
-
 
 
 async def _backup_service_loop() -> None:
     while True:
-        log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup service running; checking for backup necessity.")
         last_backup = _get_last_backup()
         should_backup = False
 
@@ -140,13 +134,8 @@ async def _backup_service_loop() -> None:
                 should_backup = True
 
         if should_backup:
-            log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup window reached; creating a new backup.")
-
             if await _create_backup():
                 _cleanup()
-        else:
-            log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup skipped; most recent backup is within interval.")
-        log_message(f"[DEBUG] [{PRINT_PREFIX}] Backup service sleeping for {INTERVAL} seconds.")
         await asyncio.sleep(INTERVAL)
 
 async def _wait_for_db_ready(db_ready_signal) -> None:
@@ -157,9 +146,7 @@ async def _wait_for_db_ready(db_ready_signal) -> None:
 
 
 async def _wait_for_db_ready_and_start(db_ready_signal) -> None:
-    log_message(f"[INFO] [{PRINT_PREFIX}] Waiting for DB ready signal before starting backup loop.")
     await _wait_for_db_ready(db_ready_signal)
-    log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal received. Starting backup loop.")
     await _backup_service_loop()
 
 

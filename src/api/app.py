@@ -59,25 +59,19 @@ async def lifespan(app: fastapi.FastAPI):
     await init_db()
 
     if is_cookie_expiry_service_enabled():
-        log_message(f"[INFO] [{PRINT_PREFIX}] Starting cookie expiry service...")
         background_tasks.append(TaskSupervisor(cookie_expiry_service_loop, name="CookieExpiryService"))
     
     if is_backup_service_enabled():
-        log_message(f"[INFO] [{PRINT_PREFIX}] Starting backup service...")
         background_tasks.append(TaskSupervisor(backup_service_loop, name="BackupService"))
         
     if is_healthcheck_service_enabled():
-        log_message(f"[INFO] [{PRINT_PREFIX}] Starting healthcheck service...")
         background_tasks.append(TaskSupervisor(healthcheck_service_loop, name="HealthcheckService"))
 
     for task in background_tasks:
         task.supervise_task()
-    if background_tasks:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Started {len(background_tasks)} supervised background task(s).")
     
     if _DB_READY_SIGNAL is not None:
         _DB_READY_SIGNAL.set_ready()
-        log_message(f"[INFO] [{PRINT_PREFIX}] DB ready signal set to ready.")
     log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan startup complete.")
 
     yield # Application waits here while running, then resumes after shutdown.
@@ -85,7 +79,6 @@ async def lifespan(app: fastapi.FastAPI):
     log_message(f"[INFO] [{PRINT_PREFIX}] API lifespan shutdown complete... performing cleanup.")
     if background_tasks:
         await asyncio.gather(*(task.cancel() for task in background_tasks), return_exceptions=True)
-        log_message(f"[INFO] [{PRINT_PREFIX}] Supervised background tasks stopped.")
     await RedisClient.close()
     await close_db()
 
@@ -103,10 +96,6 @@ def start_api_server(db_ready_signal=None):
     if not API_ENABLED:
         log_message(f"[INFO] [{PRINT_PREFIX}] API server is disabled in the configuration.")
         return
-    log_message(
-        f"[DEBUG] [{PRINT_PREFIX}] Registered router tags: "
-        f"{api_db_routes.router.tags + user_db_routes.router.tags}"
-    )
     log_message(f"[INFO] [{PRINT_PREFIX}] Starting API server on port {API_PORT}...")
     uvicorn.run(app, host="0.0.0.0", port=API_PORT, forwarded_allow_ips=",".join(TRUSTED_PROXIES))
     
@@ -116,14 +105,12 @@ def start_api_server(db_ready_signal=None):
 @with_ip_block
 async def root(request: Request):
     """Root endpoint for the API service; returns a simple greeting message."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Root endpoint called.")
     return {"message": "Hello from the backend!"}
 
 @test_router.post("/api-auth-test")
 @with_ip_block
 @api_authentication(permission_level=VIEW_LEVEL)
 async def auth_test(request: Request):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Auth test endpoint called.")
     return {
         "message": f"API key is valid: {request.state.api_data}"
     }
@@ -131,10 +118,6 @@ async def auth_test(request: Request):
 @test_router.post("/login-auth-test")
 @with_ip_block
 async def login_test(login_request: LoginRequestBase, request: Request,):
-    log_message(
-        f"[DEBUG] [{PRINT_PREFIX}] Login test endpoint called for user: {login_request.username}."
-    )
-
     token, _ = await auth_and_grant_token(
         username=login_request.username,
         password=login_request.password,
@@ -151,7 +134,6 @@ async def login_test(login_request: LoginRequestBase, request: Request,):
 @with_ip_block
 @cookie_authentication()
 async def cookie_test(request: Request):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Cookie auth test endpoint called.")
     response = JSONResponse(content={"message": "Cookie authentication successful."})
     return response
 

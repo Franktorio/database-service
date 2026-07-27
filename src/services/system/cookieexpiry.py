@@ -22,14 +22,8 @@ async def _revoke_expired_auth_cookies_with_service_session() -> int:
 
 
 async def _cookie_expiry_loop() -> None:
-    log_message(
-        f"[INFO] [{PRINT_PREFIX}] Cookie expiry revocation loop started. "
-        f"interval={COOKIE_EXPIRY_SWEEP_INTERVAL}s"
-    )
     while True:
-        revoked = await _revoke_expired_auth_cookies_with_service_session()
-        if revoked > 0:
-            log_message(f"[DEBUG] [{PRINT_PREFIX}] Revoked {revoked} expired auth cookie rows.")
+        await _revoke_expired_auth_cookies_with_service_session()
         await asyncio.sleep(COOKIE_EXPIRY_SWEEP_INTERVAL)
 
 def is_cookie_expiry_service_enabled() -> bool:

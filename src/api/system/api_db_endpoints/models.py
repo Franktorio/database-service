@@ -5,9 +5,6 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from src.api.config import VIEW_LEVEL, SUPER_ADMIN_LEVEL
-from src.services.system.logging import log_message
-
-PRINT_PREFIX = "API DB MODELS"
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -23,6 +20,3 @@ class ApiKeyPatchRequest(BaseModel):
     new_permission_level: Optional[int] = Field(default=None, ge=VIEW_LEVEL, le=SUPER_ADMIN_LEVEL, description="Optional replacement permission level.")
     new_rate_limit: Optional[int] = Field(default=None, ge=1, description="Optional replacement requests-per-minute limit.")
     new_email: Optional[str] = Field(default=None, description="Optional replacement email associated with the API key.")
-
-
-log_message(f"[DEBUG] [{PRINT_PREFIX}] API key admin request models loaded.")

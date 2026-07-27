@@ -34,8 +34,6 @@ class TaskSupervisor:
 
         while not self._shutdown:
             try:
-                log_message(f"[INFO] [{PRINT_PREFIX}] Starting task {self.name}.")
-
                 self._task = asyncio.create_task(
                     self.coroutine_func(),
                     name=self.name
@@ -51,7 +49,6 @@ class TaskSupervisor:
                 log_message(f"[WARNING] [{PRINT_PREFIX}] Task {self.name} exited unexpectedly.")
 
             except asyncio.CancelledError:
-                log_message(f"[INFO] [{PRINT_PREFIX}] Supervisor for task {self.name} was cancelled.")
                 break
 
             except (RuntimeError, ValueError, TypeError, OSError) as e:
@@ -69,18 +66,12 @@ class TaskSupervisor:
                 )
                 break
 
-            log_message(
-                f"[INFO] [{PRINT_PREFIX}] Restarting task {self.name} in {current_delay} seconds."
-            )
-
             try:
                 await asyncio.sleep(current_delay)
             except asyncio.CancelledError:
                 break
 
             current_delay *= 2
-
-        log_message(f"[INFO] [{PRINT_PREFIX}] Supervisor for task {self.name} has stopped.")
 
     def supervise_task(self):
         """Start supervising the task."""
@@ -99,9 +90,6 @@ class TaskSupervisor:
 
     async def cancel(self):
         """Cancel the supervised task."""
-
-        log_message(f"[INFO] [{PRINT_PREFIX}] Cancelling task {self.name}.")
-
         self._shutdown = True
 
         if self._task is not None and not self._task.done():
@@ -114,5 +102,3 @@ class TaskSupervisor:
             *(task for task in [self._task, self._supervisor_task] if task is not None),
             return_exceptions=True
         )
-
-        log_message(f"[INFO] [{PRINT_PREFIX}] Task {self.name} cancelled.")

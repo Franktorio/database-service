@@ -63,7 +63,6 @@ def get_last_backup():
         backups,
         key=lambda p: p.stat().st_mtime
     )
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Latest backup selected: {latest_backup.name}")
     return latest_backup
 
 async def database_query_check():
@@ -214,7 +213,6 @@ async def healthcheck_service():
     _last_restored_backup: Path | None = None
     _restore_attempts = 0
 
-    log_message(f"[INFO] [{PRINT_PREFIX}] Starting database healthcheck service with interval {INTERVAL} seconds.")
     failure_count = 0
 
     while True:
@@ -239,8 +237,6 @@ async def healthcheck_service():
             _healthy = False
             failure_count += 1
         else:
-            if not _healthy:
-                log_message(f"[INFO] [{PRINT_PREFIX}] Database healthcheck recovered. Resetting failure count.")
             _healthy = True
             _restore_attempted = False
             _restore_attempts = 0
@@ -267,7 +263,6 @@ async def healthcheck_service():
                             _last_restored_backup = latest_backup
                             restore_from_backup(latest_backup)
                             failure_count = 0
-                            log_message(f"[INFO] [{PRINT_PREFIX}] Auto-rollover completed successfully.")
 
                         else:
                             log_message(f"[ERROR] [{PRINT_PREFIX}] No backup found for auto-rollover, shutting down.")
@@ -296,7 +291,6 @@ async def healthcheck_service():
                     log_message(f"[CRITICAL] [{PRINT_PREFIX}] Bad backup: {_last_restored_backup.name} (quarantined).")
                     _restore_attempts += 1
                     if _restore_attempts < MAX_RESTORE_ATTEMPTS:
-                        log_message(f"[INFO] [{PRINT_PREFIX}] Attempting to restore from the next latest backup. Attempt {_restore_attempts + 1}/{MAX_RESTORE_ATTEMPTS}.")
                         _restore_attempted = False  # Reset to allow another restore attempt
                         _last_restored_backup = None  # Reset to allow selection of the next latest backup
                     else:

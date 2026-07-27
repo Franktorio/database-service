@@ -70,7 +70,6 @@ async def add_auth_cookie(
     session.add(auth_cookie)
     await session.commit()
     await session.refresh(auth_cookie)
-    log_message(f"[INFO] [{PRINT_PREFIX}] Auth cookie row created with id {auth_cookie.id}.")
 
     return auth_cookie
 
@@ -93,8 +92,6 @@ async def get_auth_cookies_by_uid(user_id: int, session: AsyncSession | None = N
     stmt = select(AuthCookie).where(AuthCookie.user_id == user_id)
     result = await session.execute(stmt)
     rows = result.scalars().all()
-    if not rows:
-        log_message(f"[INFO] [{PRINT_PREFIX}] No auth cookies found for user ID {user_id}.")
 
     return rows
 
@@ -113,7 +110,6 @@ async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = Non
     await session.commit()
     await _invalidate_cookie_cache(token_hash)
     await _invalidate_user_permission_cache(row.username)
-    log_message(f"[INFO] [{PRINT_PREFIX}] Auth cookie revoked for hash.")
 
     return True
 
@@ -139,7 +135,6 @@ async def refresh_auth_cookie(
     row.revoked = False
     await session.commit()
     await session.refresh(row)
-    log_message(f"[INFO] [{PRINT_PREFIX}] Refreshed auth cookie row id {row.id}.")
 
     return row
 
@@ -159,8 +154,6 @@ async def revoke_expired_auth_cookies(
     result = await session.execute(stmt)
     await session.commit()
     revoked = result.rowcount or 0
-    if revoked > 0:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Revoked {revoked} expired auth cookie rows.")
 
     return revoked
 
@@ -183,8 +176,6 @@ async def delete_expired_auth_cookies(
     for token_hash, username in stale_rows:
         await _invalidate_cookie_cache(token_hash)
         await _invalidate_user_permission_cache(username)
-    if deleted > 0:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Deleted {deleted} expired auth cookie rows.")
 
     return deleted
 
@@ -203,7 +194,5 @@ async def delete_auth_cookies_by_username(username: str, session: AsyncSession |
     for token_hash in token_hashes:
         await _invalidate_cookie_cache(token_hash)
     await _invalidate_user_permission_cache(username)
-    if deleted > 0:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Deleted {deleted} auth cookie rows for user {username}.")
 
     return deleted

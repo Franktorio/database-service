@@ -16,16 +16,12 @@ from src.models.crud.system.user_crud import (
 from src.security.validation.api_security import api_authentication
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
-from src.services.system.logging import log_message
-
-PRINT_PREFIX = "PATCH USER DB ROUTES"
 
 
 @router.patch("/{username}")
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def patch_user(username: str, request: Request, model: UserUpdateRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user update request for username {username}.")
     try:
         updated = await update_user(
             username,
@@ -59,8 +55,6 @@ async def patch_user(username: str, request: Request, model: UserUpdateRequest):
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def patch_user_password(username: str, request: Request, model: UserPasswordUpdateRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received user password update request for username {username}.")
-
     new_password_hash, new_password_salt = hash_password(
         model.new_password,
         iterations=PASSWORD_HASH_ITERATIONS,
@@ -91,8 +85,6 @@ async def patch_user_password(username: str, request: Request, model: UserPasswo
 @with_ip_block
 @api_authentication(permission_level=SUPER_ADMIN_LEVEL)
 async def patch_user_login_rate_limit(username: str, request: Request, model: UserLoginRateLimitUpdateRequest):
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Received login-rate-limit update request for username {username}.")
-
     updated = await update_user_login_rate_limit(
         username,
         new_login_rate_limit=model.new_login_rate_limit,

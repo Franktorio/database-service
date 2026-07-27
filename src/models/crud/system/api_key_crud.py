@@ -42,21 +42,16 @@ async def add_api_key(
     session: AsyncSession | None = None,
 ) -> ApiKey:
     """Add a new API key to the database."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Adding API key with permission level {permission_level} and rate limit {rate_limit} to email {email}.")
-
     api_key = ApiKey(key_hash=key_hash, permission_level=permission_level, rate_limit=rate_limit, email=email)
     session.add(api_key)
     await session.commit()
     await session.refresh(api_key)
-    log_message(f"[INFO] [{PRINT_PREFIX}] API key row created with id {api_key.id}.")
 
     return api_key
 
 @with_session
 async def get_api_key(key_hash: str, session: AsyncSession | None = None) -> ApiKey | None:
     """Fetch an API key by its hash."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Fetching API key by hash.")
-
     stmt = select(ApiKey).where(ApiKey.key_hash == key_hash)
     result = await session.execute(stmt)
     api_key = result.scalar_one_or_none()
@@ -72,7 +67,6 @@ async def get_api_keys(session: AsyncSession | None = None) -> list[ApiKey]:
     stmt = select(ApiKey).order_by(ApiKey.created_at)
     result = await session.execute(stmt)
     api_keys = result.scalars().all()
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Retrieved {len(api_keys)} API key rows.")
 
     return api_keys
 
@@ -84,9 +78,7 @@ async def delete_api_key(key_hash: str, session: AsyncSession | None = None) -> 
     result = await session.execute(stmt)
     await session.commit()
     deleted = result.rowcount > 0
-    if deleted:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Deleted API key for provided hash.")
-    else:
+    if not deleted:
         log_message(f"[WARNING] [{PRINT_PREFIX}] No API key found to delete for provided hash.")
 
     return deleted
@@ -102,7 +94,6 @@ async def update_api_key(
     session: AsyncSession | None = None,
 ) -> ApiKey | None:
     """Update the permission level, rate limit, and/or email of an API key."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating API key attributes.")
     stmt = (
         update(ApiKey)
         .where(ApiKey.key_hash == key_hash)
@@ -118,7 +109,5 @@ async def update_api_key(
     updated_api_key = result.scalar_one_or_none()
     if updated_api_key is None:
         log_message(f"[WARNING] [{PRINT_PREFIX}] API key update skipped; key not found.")
-    else:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Updated API key id {updated_api_key.id}.")
 
     return updated_api_key

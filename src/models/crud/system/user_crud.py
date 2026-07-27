@@ -53,7 +53,6 @@ async def add_user(
     if not normalized_role:
         raise ValueError("User creation requires a non-empty role.")
 
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Adding user {username} with role {initial_role}.")
     user = User(
         username=username,
         password_hash=password_hash,
@@ -67,7 +66,6 @@ async def add_user(
     session.add(user)
     await session.commit()
     await session.refresh(user)
-    log_message(f"[INFO] [{PRINT_PREFIX}] User row created with id {user.id}.")
 
     return user
 
@@ -75,11 +73,9 @@ async def add_user(
 @with_session
 async def get_users(session: AsyncSession | None = None) -> list[User]:
     """Fetch all users."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Fetching all users.")
     stmt = select(User).order_by(User.username)
     result = await session.execute(stmt)
     users = result.scalars().all()
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Retrieved {len(users)} user rows.")
 
     return users
 
@@ -87,7 +83,6 @@ async def get_users(session: AsyncSession | None = None) -> list[User]:
 @with_session
 async def get_user_by_username(username: str, session: AsyncSession | None = None) -> User | None:
     """Fetch a user by their username."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Fetching user by username: {username}.")
     stmt = select(User).where(User.username == username)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
@@ -108,7 +103,6 @@ async def update_user(
     session: AsyncSession | None = None,
 ) -> User | None:
     """Update a user's email and/or roles."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating user {username}.")
     stmt = select(User).where(User.username == username)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
@@ -160,7 +154,6 @@ async def update_user(
 
     await session.commit()
     await session.refresh(user)
-    log_message(f"[INFO] [{PRINT_PREFIX}] Updated user {username}.")
 
     return user
 
@@ -169,15 +162,12 @@ async def update_user(
 @with_session
 async def delete_user(username: str, session: AsyncSession | None = None) -> bool:
     """Delete a user by their username."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Deleting user {username}.")
     await delete_auth_cookies_by_username(username, session=session)
     stmt = delete(User).where(User.username == username)
     result = await session.execute(stmt)
     await session.commit()
     deleted = result.rowcount > 0
-    if deleted:
-        log_message(f"[INFO] [{PRINT_PREFIX}] Deleted user {username}.")
-    else:
+    if not deleted:
         log_message(f"[WARNING] [{PRINT_PREFIX}] No user found to delete: {username}.")
 
     return deleted
@@ -194,7 +184,6 @@ async def update_user_password(
     session: AsyncSession | None = None,
 ) -> User | None:
     """Update a user's password hash metadata."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating password for user {username}.")
     stmt = select(User).where(User.username == username)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
@@ -210,7 +199,6 @@ async def update_user_password(
 
     await session.commit()
     await session.refresh(user)
-    log_message(f"[INFO] [{PRINT_PREFIX}] Updated password metadata for user {username}.")
 
     return user
 
@@ -223,7 +211,6 @@ async def update_user_login_rate_limit(
     session: AsyncSession | None = None,
 ) -> User | None:
     """Update a user's login rate limit."""
-    log_message(f"[DEBUG] [{PRINT_PREFIX}] Updating login rate limit for user {username}.")
     stmt = select(User).where(User.username == username)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
@@ -234,6 +221,5 @@ async def update_user_login_rate_limit(
     user.login_rate_limit = new_login_rate_limit
     await session.commit()
     await session.refresh(user)
-    log_message(f"[INFO] [{PRINT_PREFIX}] Updated login rate limit for user {username}.")
 
     return user

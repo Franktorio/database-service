@@ -53,12 +53,9 @@ def with_session(func):
 
 
 async def init_db():
-    log_message(f"[INFO] [{PRINT_PREFIX}] Initializing database engine.")
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
     log_message(f"[INFO] [{PRINT_PREFIX}] Database connectivity verified.")
 
 async def close_db():
-    log_message(f"[INFO] [{PRINT_PREFIX}] Closing database engine.")
     await engine.dispose()
-    log_message(f"[INFO] [{PRINT_PREFIX}] Database engine closed.")
