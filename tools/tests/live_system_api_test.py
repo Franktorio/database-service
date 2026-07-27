@@ -15,7 +15,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.loader import API_PORT
-from src.security.tokens import hash_token
 
 
 def _base_url() -> str:
@@ -108,9 +107,11 @@ def _step_create_api_key(
     payload = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
     api_key = payload.get("api_key", {}) if isinstance(payload, dict) else {}
     token = api_key.get("token") if isinstance(api_key, dict) else None
+    key_id = api_key.get("id") if isinstance(api_key, dict) else None
     if isinstance(token, str) and token:
         state["created_api_token"] = token
-        state["created_api_key_hash"] = hash_token(token)
+    if isinstance(key_id, int):
+        state["created_api_key_id"] = key_id
 
 
 def _step_update_api_key(
@@ -120,21 +121,21 @@ def _step_update_api_key(
     state: dict[str, Any],
     steps: list[dict[str, Any]],
 ) -> None:
-    key_hash = state.get("created_api_key_hash")
-    if not key_hash:
+    key_id = state.get("created_api_key_id")
+    if key_id is None:
         steps.append(
             {
-                "name": "PATCH /api/db/keys/{key_hash}",
+                "name": "PATCH /api/db/keys/{key_id}",
                 "ok": False,
                 "status_code": None,
                 "expected_status": 200,
-                "details": "Skipped because created API key hash is unavailable.",
+                "details": "Skipped because created API key id is unavailable.",
             }
         )
         return
 
     resp = session.patch(
-        f"{base_url}/api/db/keys/{key_hash}",
+        f"{base_url}/api/db/keys/{key_id}",
         headers=headers,
         json={
             "new_permission_level": 2,
@@ -143,7 +144,7 @@ def _step_update_api_key(
         },
         timeout=20,
     )
-    _record(steps, "PATCH /api/db/keys/{key_hash}", resp, 200, "Update key metadata")
+    _record(steps, "PATCH /api/db/keys/{key_id}", resp, 200, "Update key metadata")
 
 
 def _step_rate_limit_test(
@@ -361,25 +362,25 @@ def _step_delete_api_key(
     steps: list[dict[str, Any]],
 ) -> None:
     token = state.get("created_api_token")
-    key_hash = state.get("created_api_key_hash")
-    if not token or not key_hash:
+    key_id = state.get("created_api_key_id")
+    if not token or key_id is None:
         steps.append(
             {
-                "name": "DELETE /api/db/keys/{key_hash}",
+                "name": "DELETE /api/db/keys/{key_id}",
                 "ok": False,
                 "status_code": None,
                 "expected_status": 200,
-                "details": "Skipped because created API key token/hash is unavailable.",
+                "details": "Skipped because created API key token/id is unavailable.",
             }
         )
         return
 
     resp = session.delete(
-        f"{base_url}/api/db/keys/{key_hash}",
+        f"{base_url}/api/db/keys/{key_id}",
         headers=headers,
         timeout=20,
     )
-    _record(steps, "DELETE /api/db/keys/{key_hash}", resp, 200, "Delete created API key")
+    _record(steps, "DELETE /api/db/keys/{key_id}", resp, 200, "Delete created API key")
 
 
 def _step_delete_user(
@@ -412,7 +413,7 @@ def run_system_api_live_test() -> dict[str, Any]:
         "api_email": f"{username}+api@example.local",
         "api_updated_email": f"{username}+api-updated@example.local",
         "created_api_token": None,
-        "created_api_key_hash": None,
+        "created_api_key_id": None,
     }
 
     steps: list[dict[str, Any]] = []

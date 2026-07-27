@@ -25,6 +25,7 @@ from src.api.config import COOKIE_JWT_INDEX
 from src.models.crud.system.api_key_crud import add_api_key, get_api_key
 from src.models.crud.system.auth_cookie_crud import add_auth_cookie
 from src.models.crud.system.user_crud import get_user_by_username
+from src.models.tables.system.api_key_table import ApiKey
 from src.services.system.logging import log_message
 
 def generate_token() -> str:
@@ -154,12 +155,16 @@ def get_cookie_settings(expires_minutes: int = JWT_EXP_MINUTES) -> dict:
         "max_age": max_age,
     }
 
-async def create_api_key(permission_level: int = 0, rate_limit: int = 1000, email: str = "") -> str:
-    """Create a new API key and store it in the database."""
+async def create_api_key(permission_level: int = 0, rate_limit: int = 1000, email: str = "") -> tuple[str, ApiKey]:
+    """Create a new API key and store it in the database.
+
+    Returns the raw token (shown to the caller exactly once) and the stored row
+    (whose opaque `id` is the public identifier for later PATCH/DELETE calls).
+    """
     token = generate_token()
     token_hash = hash_token(token)
-    await add_api_key(token_hash, permission_level, rate_limit, email)
-    return token
+    api_key = await add_api_key(token_hash, permission_level, rate_limit, email)
+    return token, api_key
 
 async def validate_token(token: str) -> bool:
     """Validate an API key token against the stored hash."""

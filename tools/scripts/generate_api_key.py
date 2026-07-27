@@ -32,9 +32,9 @@ async def _run() -> None:
     if args.rate_limit <= 0:
         raise ValueError("rate_limit must be a positive integer")
 
-    token = await create_api_key(permission_level=args.level, rate_limit=args.rate_limit)
+    token, api_key = await create_api_key(permission_level=args.level, rate_limit=args.rate_limit)
 
-    log_message(f"[INFO] [{PRINT_PREFIX}] API key created successfully.")
+    log_message(f"[INFO] [{PRINT_PREFIX}] API key created successfully (id={api_key.id}).")
     sys.stdout.write(f"{token}\n")
 
 

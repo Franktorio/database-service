@@ -60,33 +60,34 @@ async def get_api_keys(session: AsyncSession | None = None) -> list[ApiKey]:
 
     return api_keys
 
-@cache_invalidating(_invalidate_after_api_key_write)
 @with_session
-async def delete_api_key(key_hash: str, session: AsyncSession | None = None) -> bool:
-    """Delete an API key by its hash."""
-    stmt = delete(ApiKey).where(ApiKey.key_hash == key_hash)
+async def delete_api_key_by_id(key_id: int, session: AsyncSession | None = None) -> bool:
+    """Delete an API key by its internal (opaque, public) id."""
+    stmt = delete(ApiKey).where(ApiKey.id == key_id).returning(ApiKey.key_hash)
     result = await session.execute(stmt)
+    deleted_key_hash = result.scalar_one_or_none()
     await session.commit()
-    deleted = result.rowcount > 0
-    if not deleted:
-        log_message(f"[WARNING] [{PRINT_PREFIX}] No API key found to delete for provided hash.")
+    if deleted_key_hash is None:
+        log_message(f"[WARNING] [{PRINT_PREFIX}] No API key found to delete for provided id.")
+        return False
 
-    return deleted
+    await invalidate_api_key_cache(deleted_key_hash)
+    return True
 
 
 @cache_invalidating(_invalidate_after_api_key_write)
 @with_session
-async def update_api_key(
-    key_hash: str,
+async def update_api_key_by_id(
+    key_id: int,
     new_permission_level: int | None = None,
     new_rate_limit: int | None = None,
     new_email: str | None = None,
     session: AsyncSession | None = None,
 ) -> ApiKey | None:
-    """Update the permission level, rate limit, and/or email of an API key."""
+    """Update the permission level, rate limit, and/or email of an API key, looked up by its internal (opaque, public) id."""
     stmt = (
         update(ApiKey)
-        .where(ApiKey.key_hash == key_hash)
+        .where(ApiKey.id == key_id)
         .values(
             permission_level=new_permission_level if new_permission_level is not None else ApiKey.permission_level,
             rate_limit=new_rate_limit if new_rate_limit is not None else ApiKey.rate_limit,

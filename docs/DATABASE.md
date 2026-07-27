@@ -191,7 +191,7 @@ All three tables now have Redis caches sitting in front of their hot read paths 
 
 | Table | Cached? | Cache key | Invalidated on |
 |---|---|---|---|
-| `api_keys` | ✅ Permission payload cached in Redis (`permissions:api_key:<hash>`), TTL `REDIS_PERMISSIONS_EX_SECONDS` (default 300s) | `_get_api_permission_payload()` in `api_security.py` | `add_api_key`, `update_api_key`, `delete_api_key` (via `cache_invalidating`) |
+| `api_keys` | ✅ Permission payload cached in Redis (`permissions:api_key:<hash>`), TTL `REDIS_PERMISSIONS_EX_SECONDS` (default 300s) | `_get_api_permission_payload()` in `api_security.py` | `add_api_key`, `update_api_key_by_id`, `delete_api_key_by_id` (via `cache_invalidating`/direct invalidation) |
 | `users` | ✅ Permission payload cached in Redis (`permissions:user:<username>`) | `_resolve_user_permissions()` / `_get_user_permission_payload()` | `add_user`, `update_user`, `delete_user`, `update_user_password`, `update_user_login_rate_limit` |
 | `auth_cookies` | ✅ Validity payload cached in Redis (`permissions:cookie:<hash>` → `{username, user_id, revoked, expires_at}`) | `_resolve_cookie_row()` in `cookie_security.py` | `add_auth_cookie`, `revoke_auth_cookie`, `refresh_auth_cookie`, `revoke_expired_auth_cookies`, `delete_expired_auth_cookies`, `delete_auth_cookies_by_username` (via `invalidate_cookie_cache`) |
 

@@ -125,7 +125,6 @@ List all API keys.
     "api_keys": [
       {
         "id": 1,
-        "key_hash": "3f2504e0...",
         "permission_level": 1,
         "rate_limit": 1000,
         "email": "svc-billing@example.com",
@@ -138,7 +137,7 @@ List all API keys.
   ```
   Returns `{"message": "No API keys found."}` if empty.
 
-> **Note:** `key_hash` is the SHA-256 digest of the key's secret token (not the token itself) and doubles as the resource identifier used in `PATCH`/`DELETE` below.
+> **Note:** `id` is the API key's opaque public identifier, used as the path param for `PATCH`/`DELETE` below. The internal `key_hash` (SHA-256 digest of the key's secret token) is never returned by any endpoint — it exists purely as a server-side lookup value.
 
 ### `POST /api/db/keys`
 
@@ -157,6 +156,7 @@ Create a new API key.
   {
     "message": "API key created successfully.",
     "api_key": {
+      "id": 1,
       "token": "s3cr3t-raw-token-shown-only-now",
       "permission_level": 1,
       "permission_name": "EDIT",
@@ -165,14 +165,14 @@ Create a new API key.
     }
   }
   ```
-  **The `token` value is shown exactly once.** Store it immediately — only its hash is retained server-side.
+  **The `token` value is shown exactly once.** Store it immediately — only its hash is retained server-side. **Store `id` too** — it's the opaque identifier needed for later `PATCH`/`DELETE` calls.
 - **Errors:** `403` if `permission_level >= 4`.
 
-### `PATCH /api/db/keys/{key_hash}`
+### `PATCH /api/db/keys/{key_id}`
 
 Partially update permission level, rate limit, and/or email.
 
-- **Path param:** `key_hash` — obtained from `GET /api/db/keys` or computed as `sha256(f"{API_KEY_PEPPER}:{token}")`.
+- **Path param:** `key_id` — the opaque integer `id` obtained from `GET /api/db/keys` or the `POST /api/db/keys` create response.
 - **Body** (`ApiKeyPatchRequest`, all fields optional):
 
   | Field | Type | Notes |
@@ -182,9 +182,9 @@ Partially update permission level, rate limit, and/or email.
   | `new_email` | string \| null | |
 
 - **Response `200`:** updated key object (same shape as list entry, plus `permission_name`).
-- **Errors:** `403` if promoting to `SUPER_ADMIN`; `404` if `key_hash` doesn't exist.
+- **Errors:** `403` if promoting to `SUPER_ADMIN`; `404` if `key_id` doesn't exist.
 
-### `DELETE /api/db/keys/{key_hash}`
+### `DELETE /api/db/keys/{key_id}`
 
 - **Response `200`:** `{"message": "API key deleted successfully."}`
 - **Errors:** `404` if not found.

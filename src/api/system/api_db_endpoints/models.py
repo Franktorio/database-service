@@ -26,8 +26,7 @@ class ApiKeyPatchRequest(BaseModel):
 class ApiKeyItem(BaseModel):
     """Shape of a single stored API key as returned by the list/patch endpoints."""
 
-    id: int = Field(..., description="Internal numeric identifier for the API key row.")
-    key_hash: str = Field(..., description="SHA-256 hash of the key's secret token; doubles as its public identifier.")
+    id: int = Field(..., description="Opaque numeric identifier for the API key; used as the path param for PATCH/DELETE.")
     permission_level: int = Field(..., description="Permission level of the API key.")
     permission_name: str = Field(..., description="Display name for the permission level.")
     rate_limit: int = Field(..., description="Requests allowed per RATE_LIMIT_WINDOW_SECONDS.")
@@ -46,6 +45,7 @@ class ApiKeyListResponse(BaseModel):
 class ApiKeyCreated(BaseModel):
     """Shape of the newly created API key, including its one-time raw token."""
 
+    id: int = Field(..., description="Opaque numeric identifier for the API key; used as the path param for PATCH/DELETE.")
     token: str = Field(..., description="Raw API key token; shown exactly once and never recoverable afterward.")
     permission_level: int = Field(..., description="Permission level of the new API key.")
     permission_name: str = Field(..., description="Display name for the permission level.")
@@ -61,14 +61,14 @@ class ApiKeyCreateResponse(BaseModel):
 
 
 class ApiKeyPatchResponse(BaseModel):
-    """Response body for `PATCH /api/db/keys/{key_hash}`."""
+    """Response body for `PATCH /api/db/keys/{key_id}`."""
 
     message: str = Field(..., description="Human-readable result message.")
     api_key: ApiKeyItem = Field(..., description="The updated API key.")
 
 
 class MessageResponse(BaseModel):
-    """Generic message-only response body, used for `DELETE /api/db/keys/{key_hash}`."""
+    """Generic message-only response body, used for `DELETE /api/db/keys/{key_id}`."""
 
     message: str = Field(..., description="Human-readable result message.")
 
