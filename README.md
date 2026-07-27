@@ -14,6 +14,7 @@ A self-contained **FastAPI + PostgreSQL + Redis** backend that provides authenti
 - [Requirements](#requirements)
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
+- [Deployment topologies (single-node vs. split roles)](#deployment-topologies-single-node-vs-split-roles)
 - [Running the service](#running-the-service)
 - [Operational scripts](#operational-scripts)
 - [Background services](#background-services)
@@ -147,6 +148,25 @@ All configuration is environment-driven via `config/.env` (loaded by [`config/lo
 
 Key safety behavior: in any `OPERATING_MODE` other than `development`, the app **refuses to start** (raises `RuntimeError`) if `POSTGRESQL_PASSWORD`, `API_KEY_PEPPER`, `PASSWORD_PEPPER`, `JWT_SECRET`, or `REDIS_PASSWORD` are left at their insecure default values.
 
+## Deployment topologies (single-node vs. split roles)
+
+By default (see [Getting started](#getting-started)) PostgreSQL, Redis, and the FastAPI app all run on **one** host — that's the intended shape for a $10 VPS and requires no extra steps. This repo can also be split across dedicated nodes (e.g. a managed-feeling setup with one Postgres box, one Redis box, and one or more application boxes). **What you install, enable, and run is different for each role** — pick the row that matches the node in front of you:
+
+| Node role | Run `python3 main.py`? | Install on this node | Key `.env` / config settings |
+|---|:---:|---|---|
+| **PostgreSQL node** | ❌ Never | PostgreSQL server only, via `python3 -m tools.scripts.setup_postgres` (needs this repo + venv + `config/.env` present just to run that one-off script — nothing from the repo runs continuously here afterward). | Set `POSTGRESQL_*` to the credentials/port you want provisioned. `API_ENABLED` and every `service_config.json` toggle are irrelevant here — the Python app never runs on this node. |
+| **Redis node** | ❌ Never | Redis server only, via `python3 -m tools.scripts.setup_redis` (same one-off-script caveat as above). | Set `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD` to match. Never leave `REDIS_PASSWORD` at its placeholder once this is network-reachable. |
+| **FastAPI / application node** | ✅ Yes — the only role that does | This repo + `pip install -r requirements.txt`, plus PostgreSQL/Redis **client** tools only (e.g. `sudo apt-get install postgresql-client redis-tools`) — full server packages are not needed here. | `API_ENABLED=true`; point `POSTGRESQL_HOST`/`REDIS_HOST` at the other nodes' private addresses; set every pepper/secret for real. This is also the **only** place `backup`/`dbhealthchecker`/`cookie_expiry` in `service_config.json` have any effect — see note below. |
+| **All-in-one** (default, single $10 VPS) | ✅ Yes | Everything above, on one host. | Defaults already assume `localhost` for both `POSTGRESQL_HOST` and `REDIS_HOST` — no extra steps. |
+
+**Important constraints when splitting roles — none of these are handled automatically:**
+
+- **Background services follow the app process, not the database.** `backup`, `dbhealthchecker`, and `cookie_expiry` are started inside the FastAPI `lifespan` handler (see [Running the service](#running-the-service)), so they **only run on the node where `API_ENABLED=true` and `main.py` is actually running** — there is currently no standalone mode to run them without also starting the API server. Flipping their toggles in `service_config.json` on a Postgres-only or Redis-only node has no effect, because that code path never executes there.
+- **Backups land on the application node's disk, not the database node's.** `pg_dump`/`psql` are invoked as local subprocesses on whichever node runs `main.py`, connecting out to `POSTGRESQL_HOST` — the resulting `.sql` files are written to `backups/` on that same (application) node. Plan retention and any off-box copy step accordingly (see [`docs/DATABASE.md`](docs/DATABASE.md)).
+- **`setup_postgres.py` does not open PostgreSQL to the network.** It only sets the `port` in `postgresql.conf`; `listen_addresses` and `pg_hba.conf` are left at their (localhost-only) defaults. To let a separate application node connect, you must manually set `listen_addresses` (e.g. to the node's private IP or `*`), add a scoped entry to `pg_hba.conf` for the app node's IP/CIDR (`scram-sha-256`/`md5`), restart PostgreSQL, and open the firewall for that IP only — ideally over a private network/VPC or a WireGuard/SSH tunnel, never a public IP.
+- **`setup_redis.py` does not open Redis to the network either.** It only sets `port` and `requirepass`; `redis.conf`'s default `bind 127.0.0.1 -::1` is untouched, so a remote application node cannot connect until you manually change `bind` (to a private IP, never `0.0.0.0` on a public interface) and restart. Redis carries rate-limit counters and cached permission payloads — keep it on a private network even with a password set.
+- These per-role capacity assumptions differ from the single-node estimates in [`docs/ENGINEERING_REPORT.md`](docs/ENGINEERING_REPORT.md#concurrent-user-capacity-estimates--10-vps-single-node), which explicitly assumes everything is co-located on one box — splitting roles changes the bottleneck analysis (network latency to Postgres/Redis becomes a factor; CPU contention from `pg_dump`/PBKDF2 no longer competes with Postgres/Redis for the same core).
+
 ## Running the service
 
 `main.py` initializes logging, then calls `start_api_server()`, which runs a single Uvicorn process (`uvicorn.run(app, ...)`) that also owns the asyncio event loop used by all background services. On startup, the FastAPI `lifespan` handler:
@@ -161,13 +181,13 @@ On shutdown, background tasks are cancelled, the Redis client is closed, and the
 
 Run all scripts from the project root as modules (they rely on `src`/`config` being importable):
 
-| Script | Purpose |
-|---|---|
-| `python3 -m tools.scripts.setup_postgres` | Installs, starts, and configures a local PostgreSQL instance and application role/database (Debian/Ubuntu + systemd). |
-| `python3 -m tools.scripts.setup_redis` | Installs, starts, and password-protects a local Redis instance. |
-| `python3 -m tools.scripts.generate_api_key <level> <rate_limit>` | Mints a new API key directly against the database — the **only** way to create a `SUPER_ADMIN` (level 4) key. |
-| `python3 -m tools.scripts.apply_backup <backup_file>` | Restores the database from a specific `backups/*.sql` file (drops and recreates the database first). |
-| `python3 -m tools.tests.live_system_api_test` | End-to-end smoke test against a **running** instance; requires `SYSTEM_TEST_SUPER_ADMIN_KEY`. Not a unit test suite. |
+| Script | Purpose | Typical node |
+|---|---|---|
+| `python3 -m tools.scripts.setup_postgres` | Installs, starts, and configures a local PostgreSQL instance and application role/database (Debian/Ubuntu + systemd). | PostgreSQL node |
+| `python3 -m tools.scripts.setup_redis` | Installs, starts, and password-protects a local Redis instance. | Redis node |
+| `python3 -m tools.scripts.generate_api_key <level> <rate_limit>` | Mints a new API key directly against the database — the **only** way to create a `SUPER_ADMIN` (level 4) key. | Application node (needs DB access) |
+| `python3 -m tools.scripts.apply_backup <backup_file>` | Restores the database from a specific `backups/*.sql` file (drops and recreates the database first). | Application node (where the backup file lives) |
+| `python3 -m tools.tests.live_system_api_test` | End-to-end smoke test against a **running** instance; requires `SYSTEM_TEST_SUPER_ADMIN_KEY`. Not a unit test suite. | Anywhere with network access to the API |
 
 ## Background services
 
