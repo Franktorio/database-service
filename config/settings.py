@@ -179,6 +179,20 @@ class RedisIndexPrefixes(BaseModel):
     )
 
 
+class MonitoringSettings(BaseModel):
+    """Settings for the system monitoring service (src/services/system/monitoring.py)."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Whether the monitoring service is enabled.",
+    )
+    sample_max_amount: int = Field(
+        default=100,
+        ge=1,
+        description="Maximum number of samples to keep in memory for each metric; older samples are discarded.",
+    )
+
+
 class ServiceConfig(BaseModel):
     """Root model mirroring the full shape of config/service_config.json."""
 
@@ -188,6 +202,7 @@ class ServiceConfig(BaseModel):
     setup_redis: SetupRedisSettings = Field(default_factory=SetupRedisSettings)
     cookie_expiry: CookieExpirySettings = Field(default_factory=CookieExpirySettings)
     redis_index_prefixes: RedisIndexPrefixes = Field(default_factory=RedisIndexPrefixes)
+    monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
 
 
 def _load_service_config() -> ServiceConfig:
@@ -205,3 +220,4 @@ SETUP_POSTGRES_SETTINGS: SetupPostgresSettings = SERVICE_CONFIG.setup_postgres
 SETUP_REDIS_SETTINGS: SetupRedisSettings = SERVICE_CONFIG.setup_redis
 COOKIE_EXPIRY_SETTINGS: CookieExpirySettings = SERVICE_CONFIG.cookie_expiry
 REDIS_INDEX_PREFIXES: RedisIndexPrefixes = SERVICE_CONFIG.redis_index_prefixes
+MONITORING_SETTINGS: MonitoringSettings = SERVICE_CONFIG.monitoring

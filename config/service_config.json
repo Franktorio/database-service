@@ -41,5 +41,11 @@
         "user": "user:",
         "password": "password:",
         "ip_block": "ip_block:"
+    },
+    "monitoring": 
+    {
+        "enabled": true,
+        "sample_interval": 60,
+        "sample_max_amount": 100
     }
 }

@@ -5,7 +5,6 @@ import queue
 import threading
 import logging
 from logging.handlers import TimedRotatingFileHandler
-from pathlib import Path
 from typing import Any
 
 from config.loader import OPERATING_MODE, PROJECT_ROOT
