@@ -10,6 +10,7 @@ from functools import wraps
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.services.system.monitoring import monitored
 from src.models.crud.audit_context import get_audit_actor
 from src.models.database import with_session
 from src.models.tables.system.audit_log_table import AuditLog
@@ -20,6 +21,7 @@ PRINT_PREFIX = "AUDIT LOG CRUD"
 MAX_AUDIT_LOG_PAGE_SIZE = 500
 
 
+@monitored(measuring="db", operation_type="write")
 @with_session
 async def add_audit_log(
     action: str,
@@ -37,6 +39,7 @@ async def add_audit_log(
     return audit_log
 
 
+@monitored(measuring="db", operation_type="read")
 @with_session
 async def get_audit_logs(
     limit: int = 100,
@@ -57,6 +60,7 @@ async def get_audit_logs(
     return audit_logs
 
 
+@monitored(measuring="db", operation_type="read")
 @with_session
 async def get_audit_log_by_id(log_id: int, session: AsyncSession | None = None) -> AuditLog | None:
     """Fetch a single audit log entry by its id."""

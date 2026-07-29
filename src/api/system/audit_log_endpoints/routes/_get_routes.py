@@ -6,6 +6,7 @@ from fastapi import Depends, Query, Request
 from src.api.system.audit_log_endpoints.routes.router import router
 
 from src.api.config import SUPER_ADMIN_LEVEL
+from src.services.system.monitoring import monitored
 from src.api.errors import api_error
 from src.api.system.audit_log_endpoints.models import AuditLogListResponse, AuditLogResponse
 from src.security.validation.api_security import api_key_authorized_factory
@@ -17,6 +18,7 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
 
 @router.get("", response_model=AuditLogListResponse, response_model_exclude_none=True)
+@monitored(measuring="api", operation_type="read")
 @with_ip_block
 async def list_audit_logs(
     request: Request,
@@ -32,6 +34,7 @@ async def list_audit_logs(
 
 
 @router.get("/{log_id}", response_model=AuditLogResponse)
+@monitored(measuring="api", operation_type="read")
 @with_ip_block
 async def get_audit_log(log_id: int, request: Request, api_key: ApiKey = Depends(require_super_admin)):
     audit_log = await get_audit_log_by_id(log_id)

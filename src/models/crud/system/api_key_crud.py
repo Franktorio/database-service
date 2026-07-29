@@ -1,6 +1,7 @@
 # ~/src/models/crud/api_key_crud.py
 
 from sqlalchemy import select, delete, update
+from src.services.system.monitoring import monitored
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.database import with_session
 from src.models.crud.cache_invalidation import cache_invalidating, invalidate_api_key_cache
@@ -24,6 +25,7 @@ async def _invalidate_after_api_key_write(result, *args, **kwargs) -> None:
 
 
 @audit_logged("api_key.create")
+@monitored(measuring="db", operation_type="write")
 @cache_invalidating(_invalidate_after_api_key_write)
 @with_session
 async def add_api_key(
@@ -41,6 +43,7 @@ async def add_api_key(
 
     return api_key
 
+@monitored(measuring="db", operation_type="read")
 @with_session
 async def get_api_key(key_hash: str, session: AsyncSession | None = None) -> ApiKey | None:
     """Fetch an API key by its hash."""
@@ -53,6 +56,7 @@ async def get_api_key(key_hash: str, session: AsyncSession | None = None) -> Api
     return api_key
 
 
+@monitored(measuring="db", operation_type="read")
 @with_session
 async def get_api_keys(session: AsyncSession | None = None) -> list[ApiKey]:
     """Fetch all API keys."""
@@ -62,6 +66,8 @@ async def get_api_keys(session: AsyncSession | None = None) -> list[ApiKey]:
 
     return api_keys
 
+
+@monitored(measuring="db", operation_type="write")
 @audit_logged("api_key.delete")
 @with_session
 async def delete_api_key_by_id(key_id: int, session: AsyncSession | None = None) -> bool:
@@ -78,6 +84,7 @@ async def delete_api_key_by_id(key_id: int, session: AsyncSession | None = None)
     return True
 
 
+@monitored(measuring="db", operation_type="write")
 @audit_logged("api_key.update")
 @cache_invalidating(_invalidate_after_api_key_write)
 @with_session

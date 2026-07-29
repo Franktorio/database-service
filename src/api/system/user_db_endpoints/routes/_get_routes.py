@@ -1,6 +1,7 @@
 from fastapi import Depends, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL
+from src.services.system.monitoring import monitored
 from src.api.errors import api_error
 from src.api.system.user_db_endpoints.models import UserListResponse, UserResponse
 from src.api.system.user_db_endpoints.routes.router import router
@@ -13,6 +14,7 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
 
 @router.get("", response_model=UserListResponse, response_model_exclude_none=True)
+@monitored(measuring="api", operation_type="read")
 @with_ip_block
 async def list_users(request: Request, api_key: ApiKey = Depends(require_super_admin)):
     users = await get_users()
@@ -39,6 +41,7 @@ async def list_users(request: Request, api_key: ApiKey = Depends(require_super_a
 
 
 @router.get("/{username}", response_model=UserResponse)
+@monitored(measuring="api", operation_type="read")
 @with_ip_block
 async def get_user(username: str, request: Request, api_key: ApiKey = Depends(require_super_admin)):
     user = await get_user_by_username(username)

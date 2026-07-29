@@ -20,6 +20,7 @@ from src.api.system.audit_log_endpoints import routes as audit_log_routes
 from src.services.system.cache.redis.client import RedisClient
 
 from src.security.validation.api_security import api_key_authorized_factory, to_api_request_data
+from src.services.system.monitoring import monitored
 from src.security.ip_block import with_ip_block
 from src.security.validation.password_security import auth_and_grant_token
 from src.security.validation.cookie_security import cookie_authorized_factory
@@ -105,6 +106,7 @@ def start_api_server(db_ready_signal=None):
     
 
 @app.get("/")
+@monitored(measuring="api", operation_type="read")
 @with_ip_block
 async def root(request: Request):
     """Root endpoint for the API service; returns a simple greeting message."""
@@ -118,6 +120,7 @@ async def auth_test(request: Request, api_key: ApiKey = Depends(api_key_authoriz
     }
 
 @test_router.post("/login-auth-test")
+@monitored(measuring="api", operation_type="read")
 @with_ip_block
 async def login_test(login_request: LoginRequestBase, request: Request,):
     token, _ = await auth_and_grant_token(
@@ -133,6 +136,7 @@ async def login_test(login_request: LoginRequestBase, request: Request,):
     return response
 
 @test_router.post("/cookie-auth-test")
+@monitored(measuring="api", operation_type="read")
 @with_ip_block
 async def cookie_test(request: Request, cookie_data: CookieRequestData = Depends(cookie_authorized_factory())):
     response = JSONResponse(content={"message": "Cookie authentication successful."})

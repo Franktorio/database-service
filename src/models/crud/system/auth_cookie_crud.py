@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import delete, select, update
 
+from src.services.system.monitoring import monitored
 from src.models.database import with_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.crud.cache_invalidation import (
@@ -27,6 +28,7 @@ async def _invalidate_after_update_auth_cookie(result, *args, **kwargs) -> None:
     await invalidate_cookie_cache(result.token_hash)
 
 
+@monitored(measuring="db", operation_type="write")
 @cache_invalidating(_invalidate_after_update_auth_cookie)
 @with_session
 async def add_auth_cookie(
@@ -48,6 +50,7 @@ async def add_auth_cookie(
     return auth_cookie
 
 
+@monitored(measuring="db", operation_type="read")
 @with_session
 async def get_auth_cookie_by_hash(token_hash: str, session: AsyncSession | None = None) -> AuthCookie | None:
     """Fetch a cookie JWT tracking row by token hash."""
@@ -60,6 +63,7 @@ async def get_auth_cookie_by_hash(token_hash: str, session: AsyncSession | None 
     return row
 
 
+@monitored(measuring="db", operation_type="read")
 @with_session
 async def get_auth_cookies_by_uid(user_id: int, session: AsyncSession | None = None) -> list[AuthCookie]:
     """Fetch all cookie JWT tracking rows for a specific user ID."""
@@ -70,6 +74,7 @@ async def get_auth_cookies_by_uid(user_id: int, session: AsyncSession | None = N
     return rows
 
 
+@monitored(measuring="db", operation_type="write")
 @with_session
 async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = None) -> bool:
     """Mark a cookie JWT tracking row as revoked."""
@@ -87,6 +92,7 @@ async def revoke_auth_cookie(token_hash: str, session: AsyncSession | None = Non
     return True
 
 
+@monitored(measuring="db", operation_type="write")
 @cache_invalidating(_invalidate_after_update_auth_cookie)
 @with_session
 async def refresh_auth_cookie(
@@ -112,6 +118,7 @@ async def refresh_auth_cookie(
     return row
 
 
+@monitored(measuring="db", operation_type="write")
 @with_session
 async def revoke_expired_auth_cookies(
     now: datetime | None = None,
@@ -139,6 +146,7 @@ async def revoke_expired_auth_cookies(
     return revoked
 
 
+@monitored(measuring="db", operation_type="write")
 @with_session
 async def delete_expired_auth_cookies(
     now: datetime | None = None,
@@ -160,6 +168,7 @@ async def delete_expired_auth_cookies(
     return deleted
 
 
+@monitored(measuring="db", operation_type="write")
 @with_session
 async def delete_auth_cookies_by_username(username: str, session: AsyncSession | None = None) -> int:
     """Delete all auth cookies for a specific user. Used in user updates and deletions coupled in the same session."""

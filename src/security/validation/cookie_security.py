@@ -4,6 +4,7 @@ from fastapi import Depends, Request
 
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
+from src.services.system.monitoring import monitored
 from src.api.errors import api_error
 from src.api.models import CookieRequestData
 from src.services.system.logging import log_message_for_ip
@@ -31,10 +32,15 @@ from src.services.system.cache.redis.client import PermissionServiceUnavailable,
 
 PRINT_PREFIX = "COOKIE SECURITY"
 
-
+@monitored(measuring="redis", operation_type="read")
+async def _get_user_permissions_from_redis(username: str) -> dict | None:
+    cached = await get_cached_permission_json(user_identifier(username))
+    if cached is not None:
+        return cached
+    return None
 
 async def _resolve_user_permissions(username: str) -> dict | None:
-    cached = await get_cached_permission_json(user_identifier(username))
+    cached = await _get_user_permissions_from_redis(username)
     if cached is not None:
         return cached
 
@@ -52,8 +58,15 @@ async def _resolve_user_permissions(username: str) -> dict | None:
     return payload
 
 
-async def _resolve_cookie_row(token_hash: str):
+@monitored(measuring="redis", operation_type="read")
+async def _get_cookie_from_redis(token_hash: str) -> dict | None:
     cached = await get_cached_permission_json(cookie_identifier(token_hash))
+    if cached is not None:
+        return cached
+    return None
+
+async def _resolve_cookie_row(token_hash: str):
+    cached = await _get_cookie_from_redis(token_hash)
     if cached is not None:
         return cached
 

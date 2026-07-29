@@ -4,6 +4,7 @@ from src.api.system.api_db_endpoints.routes.router import router
 from fastapi import Depends, Request
 
 from src.api.config import SUPER_ADMIN_LEVEL, PERM_LEVEL_MAP
+from src.services.system.monitoring import monitored
 from src.api.errors import api_error
 from src.security.tokens import create_api_key
 from src.security.validation.api_security import api_key_authorized_factory
@@ -16,6 +17,7 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
 
 @router.post("", response_model=ApiKeyCreateResponse)
+@monitored(measuring="api", operation_type="write")
 @with_ip_block
 async def create_key(request: Request, model: ApiKeyCreateRequest, api_key: ApiKey = Depends(require_super_admin)):
     if model.permission_level >= SUPER_ADMIN_LEVEL:
@@ -41,6 +43,7 @@ async def create_key(request: Request, model: ApiKeyCreateRequest, api_key: ApiK
 
 
 @router.patch("/{key_id}", response_model=ApiKeyPatchResponse)
+@monitored(measuring="api", operation_type="write")
 @with_ip_block
 async def patch_key(request: Request, key_id: int, model: ApiKeyPatchRequest, api_key: ApiKey = Depends(require_super_admin)):
     if model.new_permission_level is not None and model.new_permission_level >= SUPER_ADMIN_LEVEL:

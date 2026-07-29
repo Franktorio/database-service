@@ -2,6 +2,7 @@
 # Decorator orchestrator for password validation and rate limiting.
 
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
+from src.services.system.monitoring import monitored
 from src.api.errors import api_error
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.cache_invalidation import password_identifier, user_identifier
@@ -24,10 +25,18 @@ from src.services.system.cache.ratelimitcache import (
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
 
 
-async def _get_user_permission_payload(username: str) -> dict:
+@monitored(measuring="redis", operation_type="read")
+async def _get_user_permission_from_redis(username: str) -> dict | None:
     cached = await get_cached_permission_json(user_identifier(username))
     if cached is not None:
         return cached
+    return None
+
+async def _get_user_permission_payload(username: str) -> dict:
+    """Retrieves the permission payload for the given username, either from cache or database."""
+    cached_payload = await _get_user_permission_from_redis(username)
+    if cached_payload is not None:
+        return cached_payload
 
     user = await get_user_by_username(username)
     if user is None:

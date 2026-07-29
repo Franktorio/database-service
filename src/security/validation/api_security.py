@@ -5,6 +5,7 @@ from config.loader import RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import PERM_LEVEL_MAP
 from src.api.errors import api_error
 from src.api.models import APIRequestData
+from src.services.system.monitoring import monitored
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.audit_context import set_audit_actor
 from src.models.crud.cache_invalidation import api_key_identifier
@@ -62,12 +63,20 @@ def to_api_request_data(api_key: ApiKey) -> APIRequestData:
         permission_name=PERM_LEVEL_MAP.get(api_key.permission_level, "Unknown"),
         rate_limit=api_key.rate_limit,
     )
-
-
-async def _get_api_permission_payload(key_hash: str) -> dict | None:
+    
+@monitored(measuring="redis", operation_type="read")
+async def _get_perms_from_redis(key_hash: str) -> dict | None:
     cached = await get_cached_permission_json(api_key_identifier(key_hash))
     if cached is not None:
         return cached
+    return None
+
+
+async def _get_api_permission_payload(key_hash: str) -> dict | None:
+    """Retrieves the permission payload for the given API key hash, either from cache or database."""
+    cached_payload = await _get_perms_from_redis(key_hash)
+    if cached_payload is not None:
+        return cached_payload
 
     api_key = await get_api_key(key_hash)
     if api_key is None:

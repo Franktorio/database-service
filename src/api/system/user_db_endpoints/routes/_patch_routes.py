@@ -2,6 +2,7 @@ from fastapi import Depends, Request
 
 from config.loader import PASSWORD_HASH_ALGORITHM, PASSWORD_HASH_ITERATIONS
 from src.api.config import SUPER_ADMIN_LEVEL
+from src.services.system.monitoring import monitored
 from src.api.errors import api_error
 from src.api.system.user_db_endpoints.models import (
     UserLoginRateLimitUpdateRequest,
@@ -26,6 +27,7 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
 
 @router.patch("/{username}", response_model=UserUpdateResponse)
+@monitored(measuring="api", operation_type="write")
 @with_ip_block
 async def patch_user(username: str, request: Request, model: UserUpdateRequest, api_key: ApiKey = Depends(require_super_admin)):
     try:
@@ -58,6 +60,7 @@ async def patch_user(username: str, request: Request, model: UserUpdateRequest, 
 
 
 @router.patch("/{username}/password", response_model=UserPasswordUpdateResponse)
+@monitored(measuring="api", operation_type="write")
 @with_ip_block
 async def patch_user_password(username: str, request: Request, model: UserPasswordUpdateRequest, api_key: ApiKey = Depends(require_super_admin)):
     new_password_hash, new_password_salt = hash_password(
@@ -87,6 +90,7 @@ async def patch_user_password(username: str, request: Request, model: UserPasswo
 
 
 @router.patch("/{username}/login-rate-limit", response_model=UserLoginRateLimitUpdateResponse)
+@monitored(measuring="api", operation_type="write")
 @with_ip_block
 async def patch_user_login_rate_limit(username: str, request: Request, model: UserLoginRateLimitUpdateRequest, api_key: ApiKey = Depends(require_super_admin)):
     updated = await update_user_login_rate_limit(
