@@ -11,7 +11,7 @@ from src.models.crud.cache_invalidation import (
     invalidate_user_permission_cache,
 )
 from src.models.tables.system.auth_cookie_table import AuthCookie
-from src.models.tables.system.user_table import User
+from src.models.tables.system.users.user_table import User
 from src.services.system.logging import log_message
 
 PRINT_PREFIX = "AUTH COOKIE CRUD"
