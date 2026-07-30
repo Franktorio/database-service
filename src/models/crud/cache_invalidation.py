@@ -10,7 +10,7 @@ from functools import wraps
 
 from config.settings import REDIS_INDEX_PREFIXES
 from src.services.system.cache.permissionscache import remove_cached_permission_json
-from src.services.system.cache.ratelimitcache import remove_from_redis
+from src.services.system.cache.ratelimitcache import remove_cached_rate_limit
 
 PRINT_PREFIX = "CACHE INVALIDATION"
 
@@ -48,12 +48,12 @@ async def invalidate_user_permission_cache(username: str) -> None:
 
 async def invalidate_password_ratelimit_cache(username: str) -> None:
     """Invalidate only the cached per-username login rate-limit state."""
-    await remove_from_redis(password_identifier(username))
+    await remove_cached_rate_limit(password_identifier(username))
 
 
 async def invalidate_api_key_ratelimit_cache(key_hash: str) -> None:
     """Invalidate only the cached per-API-key rate-limit state."""
-    await remove_from_redis(api_key_identifier(key_hash))
+    await remove_cached_rate_limit(api_key_identifier(key_hash))
 
 
 async def invalidate_api_key_permission_cache(key_hash: str) -> None:
@@ -68,7 +68,7 @@ async def invalidate_cookie_permission_cache(token_hash: str) -> None:
 
 async def invalidate_cookie_ratelimit_cache(token_hash: str) -> None:
     """Invalidate only the cached per-cookie rate-limit state."""
-    await remove_from_redis(cookie_identifier(token_hash))
+    await remove_cached_rate_limit(cookie_identifier(token_hash))
 
 
 async def invalidate_user_cache(username: str) -> None:

@@ -2,7 +2,6 @@
 # Decorator orchestrator for password validation and rate limiting.
 
 from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
-from src.services.system.monitoring import monitored
 from src.api.errors import api_error
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.cache_invalidation import password_identifier, user_identifier
@@ -14,18 +13,19 @@ from src.services.system.cache.permissionscache import (
     get_cached_permission_json,
 )
 from src.services.system.cache.ratelimitcache import (
-    ALLOWED,
-    DENIED,
-    INVALID_DATA,
-    NOT_FOUND,
-    TOO_SOON,
-    place_in_redis,
-    process_request,
+    cache_rate_limit,
+    process_cached_rate_limit,
 )
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
+from config.settings import MONITORING_SETTINGS
+
+NOT_FOUND = MONITORING_SETTINGS.NOT_FOUND
+INVALID_DATA = MONITORING_SETTINGS.INVALID_DATA
+TOO_SOON = MONITORING_SETTINGS.TOO_SOON
+DENIED = MONITORING_SETTINGS.DENIED
+ALLOWED = MONITORING_SETTINGS.ALLOWED
 
 
-@monitored(measuring="redis", operation_type="read")
 async def _get_user_permission_from_redis(username: str) -> dict | None:
     cached = await get_cached_permission_json(user_identifier(username))
     if cached is not None:
@@ -59,14 +59,14 @@ async def _get_user_permission_payload(username: str) -> dict:
 
 async def _enforce_password_ratelimit(username: str, configured_limit: int) -> tuple[bool, float]:
     identifier = password_identifier(username)
-    result = await process_request(identifier)
+    result = await process_cached_rate_limit(identifier)
     if result in (NOT_FOUND, INVALID_DATA):
-        await place_in_redis(
+        await cache_rate_limit(
             identifier,
             limit=configured_limit,
             window=LOGIN_TIME_WINDOW,
         )
-        result = await process_request(identifier)
+        result = await process_cached_rate_limit(identifier)
 
     if result == ALLOWED:
         return True, 0.0

@@ -20,7 +20,7 @@ from src.api.system.audit_log_endpoints import routes as audit_log_routes
 from src.services.system.cache.redis.client import RedisClient
 
 from src.security.validation.api_security import api_key_authorized_factory, to_api_request_data
-from src.services.system.monitoring import monitored
+from src.services.system.monitoring import monitored, get_monitoring_service
 from src.security.ip_block import with_ip_block
 from src.security.validation.password_security import auth_and_grant_token
 from src.security.validation.cookie_security import cookie_authorized_factory
@@ -112,7 +112,17 @@ async def root(request: Request):
     """Root endpoint for the API service; returns a simple greeting message."""
     return {"message": "Hello from the backend!"}
 
+@app.get("/health")
+@monitored(measuring="api", operation_type="read")
+@with_ip_block
+async def health(request: Request):
+    """Health check endpoint for the API service; returns a simple status message."""
+    service = get_monitoring_service()
+    json_response = JSONResponse(content=service.get_metrics())
+    return json_response
+
 @test_router.post("/api-auth-test")
+@monitored(measuring="api", operation_type="read")
 @with_ip_block
 async def auth_test(request: Request, api_key: ApiKey = Depends(api_key_authorized_factory(VIEW_LEVEL))):
     return {

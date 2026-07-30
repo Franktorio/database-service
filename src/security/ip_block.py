@@ -19,17 +19,19 @@ from src.api.errors import api_error
 from src.security.extract import extract_client_ip, extract_request_from_call
 from src.models.crud.cache_invalidation import ip_block_identifier
 from src.services.system.cache.ratelimitcache import (
-    ALLOWED,
-    DENIED,
-    INVALID_DATA,
-    NOT_FOUND,
-    TOO_SOON,
-    place_in_redis,
-    process_request,
+    cache_rate_limit,
+    process_cached_rate_limit
 )
 from src.services.system.cache.redis.client import RateLimitServiceUnavailable
 from src.services.system.cache.redis.client import RedisClient
 from src.services.system.logging import log_message_for_ip
+from config.settings import MONITORING_SETTINGS
+
+NOT_FOUND = MONITORING_SETTINGS.NOT_FOUND
+INVALID_DATA = MONITORING_SETTINGS.INVALID_DATA
+TOO_SOON = MONITORING_SETTINGS.TOO_SOON
+DENIED = MONITORING_SETTINGS.DENIED
+ALLOWED = MONITORING_SETTINGS.ALLOWED
 
 PRINT_PREFIX = "IP BLOCK"
 
@@ -63,14 +65,15 @@ def with_ip_block(func):
             
         if blocked_retry_after is None:
             try:
-                result = await process_request(ip_block_identifier(ip_address))
+                result = await process_cached_rate_limit(identifier=ip_block_identifier(ip_address))
                 if result in (NOT_FOUND, INVALID_DATA):
-                    await place_in_redis(
+                    await cache_rate_limit(
                         ip_block_identifier(ip_address),
                         limit=IP_BLOCKING_THRESHOLD,
                         window=IP_BLOCKING_TIME_WINDOW,
                     )
-                    result = await process_request(ip_block_identifier(ip_address))
+                    # Allow the request to proceed since this is the first time seeing this IP
+                    return await func(*args, **kwargs)
             except RateLimitServiceUnavailable:
                 log_message_for_ip(ip_address, "IP block rate limiter unavailable: Redis is not reachable.", PRINT_PREFIX, level="ERROR")
                 raise api_error(503, "Rate limiter service unavailable.")

@@ -5,7 +5,6 @@ from config.loader import RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import PERM_LEVEL_MAP
 from src.api.errors import api_error
 from src.api.models import APIRequestData
-from src.services.system.monitoring import monitored
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.audit_context import set_audit_actor
 from src.models.crud.cache_invalidation import api_key_identifier
@@ -19,15 +18,17 @@ from src.services.system.cache.permissionscache import (
     get_cached_permission_json,
 )
 from src.services.system.cache.ratelimitcache import (
-    ALLOWED,
-    DENIED,
-    INVALID_DATA,
-    NOT_FOUND,
-    TOO_SOON,
-    place_in_redis,
-    process_request,
+    cache_rate_limit,
+    process_cached_rate_limit,
 )
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
+from config.settings import MONITORING_SETTINGS
+
+NOT_FOUND = MONITORING_SETTINGS.NOT_FOUND
+INVALID_DATA = MONITORING_SETTINGS.INVALID_DATA
+TOO_SOON = MONITORING_SETTINGS.TOO_SOON
+DENIED = MONITORING_SETTINGS.DENIED
+ALLOWED = MONITORING_SETTINGS.ALLOWED
 
 PRINT_PREFIX = "API AUTH"
 
@@ -64,7 +65,6 @@ def to_api_request_data(api_key: ApiKey) -> APIRequestData:
         rate_limit=api_key.rate_limit,
     )
     
-@monitored(measuring="redis", operation_type="read")
 async def _get_perms_from_redis(key_hash: str) -> dict | None:
     cached = await get_cached_permission_json(api_key_identifier(key_hash))
     if cached is not None:
@@ -94,10 +94,10 @@ async def _check_ratelimit(
     too_soon_window_seconds: int | None,
 ) -> tuple[bool, float]:
     identifier = api_key_identifier(key_hash)
-    result = await process_request(identifier, too_soon_window_seconds)
+    result = await process_cached_rate_limit(identifier, too_soon_window_seconds)
     if result in (NOT_FOUND, INVALID_DATA):
-        await place_in_redis(identifier, limit=rate_limit, window=window_seconds)
-        result = await process_request(identifier, too_soon_window_seconds)
+        await cache_rate_limit(identifier, limit=rate_limit, window=window_seconds)
+        result = await process_cached_rate_limit(identifier, too_soon_window_seconds)
 
     if result == ALLOWED:
         return True, 0.0

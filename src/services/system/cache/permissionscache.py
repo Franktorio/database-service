@@ -3,6 +3,7 @@ import json
 from redis.exceptions import RedisError
 
 from config.loader import PROJECT_ROOT, REDIS_PERMISSIONS_EX_SECONDS
+from src.services.system.monitoring import monitored
 from src.services.system.cache.redis.client import RedisClient, PermissionServiceUnavailable
 
 
@@ -19,12 +20,12 @@ except FileNotFoundError as exc:
 def _key(identifier: str) -> str:
     return f"permissions:{identifier}"
 
-
+@monitored(measuring="redis", operation_type="write")
 async def cache_permission_json(
     identifier: str,
     permission_json: dict,
     ex: int | None = REDIS_PERMISSIONS_EX_SECONDS,
-) -> None:
+) -> bool:
     """Cache permission metadata JSON for an identifier."""
     try:
         await RedisClient.set(
@@ -32,12 +33,13 @@ async def cache_permission_json(
             json.dumps(permission_json),
             ex=ex,
         )
+        return True
     except RedisError as exc:
         raise PermissionServiceUnavailable(
             f"Redis error occurred while caching permissions: {exc}"
         ) from exc
 
-
+@monitored(measuring="redis", operation_type="read")
 async def get_cached_permission_json(identifier: str) -> dict | None:
     """Retrieve cached permission metadata JSON for an identifier."""
     try:
@@ -50,11 +52,12 @@ async def get_cached_permission_json(identifier: str) -> dict | None:
             f"Redis error occurred while retrieving cached permissions: {exc}"
         ) from exc
 
-
-async def remove_cached_permission_json(identifier: str) -> None:
+@monitored(measuring="redis", operation_type="write")
+async def remove_cached_permission_json(identifier: str) -> bool:
     """Remove cached permission metadata JSON for an identifier."""
     try:
         await RedisClient.delete(_key(identifier))
+        return True
     except RedisError as exc:
         raise PermissionServiceUnavailable(
             f"Redis error occurred while removing cached permissions: {exc}"

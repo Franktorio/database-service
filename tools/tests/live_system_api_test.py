@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import json
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,10 @@ def _super_admin_headers() -> dict[str, str]:
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
+    
+def _pretty_print_json(data: Any) -> None:
+
+    print(json.dumps(data, indent=4, sort_keys=True))
 
 
 def _record(
@@ -458,6 +463,17 @@ def run_system_api_live_test() -> dict[str, Any]:
         "steps": steps,
     }
 
+def get_metrics() -> dict[str, Any]:
+    """Get the current monitoring metrics from the API service."""
+    base_url = _base_url()
+    try:
+        response = requests.get(f"{base_url}/health", timeout=10)
+        if response.status_code == 200:
+            return response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+        else:
+            return {"error": f"Unexpected status code {response.status_code}"}
+    except requests.RequestException as e:
+        return {"error": str(e)}
 
 def _print_report(report: dict[str, Any]) -> None:
     print("=" * 72)
@@ -475,6 +491,11 @@ def _print_report(report: dict[str, Any]) -> None:
         print(f"[{status}] {step['name']} (expected={expected}, actual={actual})")
         if step["details"]:
             print(f"       {step['details']}")
+    
+    metrcics = get_metrics()
+    print("-" * 72)
+    print("API SERVICE METRICS")
+    _pretty_print_json(metrcics)
 
 
 if __name__ == "__main__":

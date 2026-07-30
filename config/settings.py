@@ -191,6 +191,12 @@ class MonitoringSettings(BaseModel):
         ge=1,
         description="Maximum number of samples to keep in memory for each metric; older samples are discarded.",
     )
+    # Constants representing possible outcomes of monitored operations.
+    NOT_FOUND: str = "NOT_FOUND"
+    INVALID_DATA: str = "INVALID_DATA"
+    TOO_SOON: str = "TOO_SOON"
+    DENIED: str = "DENIED"
+    ALLOWED: str = "ALLOWED"
 
 
 class ServiceConfig(BaseModel):

@@ -4,13 +4,8 @@ from typing import Literal
 from redis.exceptions import RedisError
 
 from config.loader import PROJECT_ROOT, RATE_LIMIT_WINDOW_SECONDS, REDIS_RATELIMIT_EX_SECONDS
+from src.services.system.monitoring import monitored
 from src.services.system.cache.redis.client import RedisClient, RateLimitServiceUnavailable
-
-NOT_FOUND = "NOT_FOUND"
-INVALID_DATA = "INVALID_DATA"
-TOO_SOON = "TOO_SOON"
-DENIED = "DENIED"
-ALLOWED = "ALLOWED"
 
 
 try:
@@ -26,8 +21,8 @@ except FileNotFoundError as exc:
 def _key(identifier: str) -> str:
     return f"ratelimit:{identifier}"
 
-
-async def process_request(
+@monitored(measuring="redis", operation_type="read")
+async def process_cached_rate_limit(
     identifier: str,
     too_soon_window_seconds: int | None = None,
 ) -> Literal["ALLOWED", "DENIED", "TOO_SOON", "NOT_FOUND", "INVALID_DATA"]:
@@ -45,13 +40,13 @@ async def process_request(
             f"Redis error occurred while checking rate limit: {exc}"
         ) from exc
 
-
-async def place_in_redis(
+@monitored(measuring="redis", operation_type="write")
+async def cache_rate_limit(
     identifier: str,
     limit: int,
     window: int | None = RATE_LIMIT_WINDOW_SECONDS,
     ex: int | None = REDIS_RATELIMIT_EX_SECONDS,
-) -> None:
+) -> bool:
     """Store rate-limit metadata for an identifier in Redis."""
     try:
         await RedisClient.hset(
@@ -62,16 +57,18 @@ async def place_in_redis(
             window=window,
             last_request_time=time.time(),
         )
+        return True
     except RedisError as exc:
         raise RateLimitServiceUnavailable(
             f"Redis error occurred while placing rate limit information: {exc}"
         ) from exc
 
-
-async def remove_from_redis(identifier: str) -> None:
+@monitored(measuring="redis", operation_type="write")
+async def remove_cached_rate_limit(identifier: str) -> bool:
     """Remove rate-limit metadata from Redis for an identifier."""
     try:
         await RedisClient.delete(_key(identifier))
+        return True
     except RedisError as exc:
         raise RateLimitServiceUnavailable(
             f"Redis error occurred while removing rate limit information: {exc}"

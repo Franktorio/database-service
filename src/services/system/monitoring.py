@@ -8,6 +8,12 @@ from typing import Literal
 
 from config.settings import MONITORING_SETTINGS
 
+NOT_FOUND = MONITORING_SETTINGS.NOT_FOUND
+INVALID_DATA = MONITORING_SETTINGS.INVALID_DATA
+TOO_SOON = MONITORING_SETTINGS.TOO_SOON
+DENIED = MONITORING_SETTINGS.DENIED
+ALLOWED = MONITORING_SETTINGS.ALLOWED
+
 
 @dataclass(slots=True)
 class EndpointMetaData:
@@ -192,12 +198,15 @@ def monitored(measuring: Literal["api", "db", "redis"], operation_type: Literal[
             was_exception = False
             response_status_code = 200  # Default to 200, can be overridden
             
+            result = None  # Initialize result to None in case of exceptions before assignment
+            
             try:
                 result = await func(*args, **kwargs)
                 if measuring == "api":
                     response_status_code = getattr(result, "status_code", 200)
                 return result
             except Exception as e:
+                print(f"Exception in monitored function '{func.__name__}': {e}")
                 if measuring == "api":
                     response_status_code = getattr(e, "status_code", 500)
                     if response_status_code >= 500: # Count server errors as exceptions
@@ -227,7 +236,7 @@ def monitored(measuring: Literal["api", "db", "redis"], operation_type: Literal[
                     )
                     _monitoring_service.record_operation(metadata)
                 elif measuring == "redis":
-                    cache_miss = result is None  # Assuming a cache miss if the result is None
+                    cache_miss = result is None or result == NOT_FOUND  # Assuming a cache miss if the result is None or NOT_FOUND
                     metadata = RedisOperationMetaData(
                         func_name=func.__name__,
                         operation_type=operation_type,
@@ -241,4 +250,5 @@ def monitored(measuring: Literal["api", "db", "redis"], operation_type: Literal[
     return decorator
 
 def get_monitoring_service() -> MonitoringService:
+    """Get the singleton instance of the MonitoringService."""
     return _monitoring_service

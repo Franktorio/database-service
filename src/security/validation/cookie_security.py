@@ -4,7 +4,6 @@ from fastapi import Depends, Request
 
 from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
-from src.services.system.monitoring import monitored
 from src.api.errors import api_error
 from src.api.models import CookieRequestData
 from src.services.system.logging import log_message_for_ip
@@ -20,19 +19,20 @@ from src.services.system.cache.permissionscache import (
     get_cached_permission_json,
 )
 from src.services.system.cache.ratelimitcache import (
-    ALLOWED,
-    DENIED,
-    INVALID_DATA,
-    NOT_FOUND,
-    TOO_SOON,
-    place_in_redis,
-    process_request,
+    cache_rate_limit,
+    process_cached_rate_limit,
 )
 from src.services.system.cache.redis.client import PermissionServiceUnavailable, RateLimitServiceUnavailable
+from config.settings import MONITORING_SETTINGS
+
+NOT_FOUND = MONITORING_SETTINGS.NOT_FOUND
+INVALID_DATA = MONITORING_SETTINGS.INVALID_DATA
+TOO_SOON = MONITORING_SETTINGS.TOO_SOON
+DENIED = MONITORING_SETTINGS.DENIED
+ALLOWED = MONITORING_SETTINGS.ALLOWED
 
 PRINT_PREFIX = "COOKIE SECURITY"
 
-@monitored(measuring="redis", operation_type="read")
 async def _get_user_permissions_from_redis(username: str) -> dict | None:
     cached = await get_cached_permission_json(user_identifier(username))
     if cached is not None:
@@ -58,7 +58,6 @@ async def _resolve_user_permissions(username: str) -> dict | None:
     return payload
 
 
-@monitored(measuring="redis", operation_type="read")
 async def _get_cookie_from_redis(token_hash: str) -> dict | None:
     cached = await get_cached_permission_json(cookie_identifier(token_hash))
     if cached is not None:
@@ -90,14 +89,14 @@ async def _resolve_cookie_row(token_hash: str):
 
 async def _ensure_cookie_ratelimit(token_hash: str) -> tuple[bool, float]:
     identifier = cookie_identifier(token_hash)
-    result = await process_request(identifier)
+    result = await process_cached_rate_limit(identifier)
     if result in (NOT_FOUND, INVALID_DATA):
-        await place_in_redis(
+        await cache_rate_limit(
             identifier,
             limit=COOKIE_DEFAULT_RATE_LIMIT,
             window=RATE_LIMIT_WINDOW_SECONDS,
         )
-        result = await process_request(identifier)
+        result = await process_cached_rate_limit(identifier)
 
     if result == ALLOWED:
         return True, 0.0
