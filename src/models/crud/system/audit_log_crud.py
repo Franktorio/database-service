@@ -72,7 +72,20 @@ async def get_audit_log_by_id(log_id: int, session: AsyncSession | None = None) 
 
     return audit_log
 
-
+def log_audit_entry(action: str, user_id: int | None = None, api_key_id: int | None = None, ip_address: str = ""):
+    """Logs the audit entry to the application logs."""
+    message = f"[INFO] [{PRINT_PREFIX}] "
+    
+    if user_id is not None:
+        message += f"User ID: {user_id}, "
+    if api_key_id is not None:
+        message += f"API Key ID: {api_key_id}, "
+    if ip_address:
+        message += f"IP Address: {ip_address}, "
+    message += f"Action: {action}"
+    
+    log_message(message)
+    
 def audit_logged(action: str):
     """Decorator factory: after the wrapped async CRUD write succeeds (returns a
     truthy value), append an audit log entry attributed to the current request's
@@ -103,6 +116,7 @@ def audit_logged(action: str):
                     api_key_id=actor.api_key_id,
                     ip_address=actor.ip_address,
                 )
+                log_audit_entry(action=action, user_id=actor.user_id, api_key_id=actor.api_key_id, ip_address=actor.ip_address)
             return result
 
         return wrapper
