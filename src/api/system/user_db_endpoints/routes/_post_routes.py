@@ -6,7 +6,8 @@ from src.api.config import SUPER_ADMIN_LEVEL
 from src.api.errors import api_error
 from src.api.system.user_db_endpoints.models import UserCreateRequest, UserCreateResponse
 from src.api.system.user_db_endpoints.routes.router import router
-from src.models.crud.system.user_crud import add_user, get_user_by_username
+from src.models.crud.system.user.user_crud import create_user, get_user_by_username
+from src.models.crud.system.user.user_role_crud import get_roles_for_user
 from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
@@ -18,7 +19,7 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @router.post("", response_model=UserCreateResponse)
 @monitored(measuring="api", operation_type="write")
 @with_ip_block
-async def create_user(request: Request, model: UserCreateRequest, api_key: ApiKey = Depends(require_super_admin)):
+async def create_user_route(request: Request, model: UserCreateRequest, api_key: ApiKey = Depends(require_super_admin)):
     existing_user = await get_user_by_username(model.username)
     if existing_user is not None:
         raise api_error(409, f"User '{model.username}' already exists.")
@@ -27,7 +28,7 @@ async def create_user(request: Request, model: UserCreateRequest, api_key: ApiKe
         model.password,
         iterations=PASSWORD_HASH_ITERATIONS,
     )
-    created_user = await add_user(
+    created_user = await create_user(
         username=model.username,
         password_hash=password_hash,
         password_salt=password_salt,
@@ -37,6 +38,7 @@ async def create_user(request: Request, model: UserCreateRequest, api_key: ApiKe
         initial_role=model.initial_role,
         login_rate_limit=model.login_rate_limit,
     )
+    roles = await get_roles_for_user(created_user.id)
 
     return {
         "message": "User created successfully.",
@@ -44,7 +46,7 @@ async def create_user(request: Request, model: UserCreateRequest, api_key: ApiKe
             "id": created_user.id,
             "username": created_user.username,
             "email": created_user.email,
-            "roles": created_user.roles,
+            "roles": roles,
             "login_rate_limit": created_user.login_rate_limit,
             "hash_algorithm": created_user.hash_algorithm,
             "hash_iterations": created_user.hash_iterations,

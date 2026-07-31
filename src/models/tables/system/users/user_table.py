@@ -1,4 +1,4 @@
-# ~src/models/tables/user_table.py
+# ~src/models/tables/system/users/user_table.py
 
 from datetime import datetime
 

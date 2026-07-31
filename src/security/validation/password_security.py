@@ -5,7 +5,8 @@ from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
 from src.api.errors import api_error
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.cache_invalidation import password_identifier, user_identifier
-from src.models.crud.system.user_crud import get_user_by_username
+from src.models.crud.system.user.user_crud import get_user_by_username
+from src.models.crud.system.user.user_role_crud import get_roles_for_user
 from src.security.tokens import create_cookie_token
 from src.security.tokens import verify_password
 from src.services.system.cache.permissionscache import (
@@ -47,10 +48,11 @@ async def _get_user_permission_payload(username: str) -> dict:
             "login_rate_limit": LOGIN_ATTEMPTS_LIMIT,
         }
 
+    roles = await get_roles_for_user(user.id)
     payload = {
         "username": user.username,
-        "roles": user.roles,
-        "role": user.role,
+        "roles": roles,
+        "role": roles[0] if roles else "",
         "login_rate_limit": user.login_rate_limit,
     }
     await cache_permission_json(user_identifier(username), payload)
@@ -115,9 +117,10 @@ async def auth_and_grant_token(username: str, password: str, ip_address: str, ex
     if not user:
         raise api_error(401, "Invalid username or password.")
 
+    roles = await get_roles_for_user(user.id)
     token = await create_cookie_token(
         username=user.username,
-        role=user.role,
+        role=roles[0] if roles else "",
         expires_minutes=expiration or 10,
     )
     return token, (expiration or 10)

@@ -24,7 +24,7 @@ from config.loader import (
 from src.api.config import COOKIE_JWT_INDEX
 from src.models.crud.system.api_key_crud import add_api_key, get_api_key
 from src.models.crud.system.auth_cookie_crud import add_auth_cookie
-from src.models.crud.system.user_crud import get_user_by_username
+from src.models.crud.system.user.user_crud import get_user_by_username
 from src.models.tables.system.api_key_table import ApiKey
 from src.services.system.logging import log_message
 

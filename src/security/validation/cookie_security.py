@@ -10,7 +10,8 @@ from src.services.system.logging import log_message_for_ip
 from src.models.crud.audit_context import set_audit_actor
 from src.models.crud.cache_invalidation import cookie_identifier, user_identifier
 from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
-from src.models.crud.system.user_crud import get_user_by_id, get_user_by_username
+from src.models.crud.system.user.user_crud import get_user_by_id, get_user_by_username
+from src.models.crud.system.user.user_role_crud import get_roles_for_user
 from src.security.extract import extract_client_ip, extract_cookie_value
 from src.security.tokens import decode_jwt_token, hash_token
 
@@ -48,10 +49,11 @@ async def _resolve_user_permissions(username: str) -> dict | None:
     if user is None:
         return None
 
+    roles = await get_roles_for_user(user.id)
     payload = {
         "username": user.username,
-        "roles": user.roles,
-        "role": user.role,
+        "roles": roles,
+        "role": roles[0] if roles else "",
         "login_rate_limit": user.login_rate_limit,
     }
     await cache_permission_json(user_identifier(username), payload)

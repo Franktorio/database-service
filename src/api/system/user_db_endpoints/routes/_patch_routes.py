@@ -13,11 +13,14 @@ from src.api.system.user_db_endpoints.models import (
     UserUpdateResponse,
 )
 from src.api.system.user_db_endpoints.routes.router import router
-from src.models.crud.system.user_crud import (
+from src.models.crud.system.user.user_crud import (
+    get_user_by_username,
+    set_user_roles,
     update_user,
     update_user_login_rate_limit,
     update_user_password,
 )
+from src.models.crud.system.user.user_role_crud import get_roles_for_user
 from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
@@ -30,31 +33,43 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @monitored(measuring="api", operation_type="write")
 @with_ip_block
 async def patch_user(username: str, request: Request, model: UserUpdateRequest, api_key: ApiKey = Depends(require_super_admin)):
-    try:
-        updated = await update_user(
-            username,
-            new_email=model.new_email,
-            set_roles=model.set_roles,
-            add_role=model.add_role,
-            remove_role=model.remove_role,
-        )
-    except ValueError as exc:
-        raise api_error(400, str(exc))
-
-    if updated is None:
+    user = await get_user_by_username(username)
+    if user is None:
         raise api_error(404, f"User '{username}' not found.")
+
+    if model.new_email is not None:
+        updated = await update_user(username, new_email=model.new_email)
+        if updated is None:
+            raise api_error(404, f"User '{username}' not found.")
+        user = updated
+
+    wants_role_change = model.set_roles is not None or model.add_role is not None or model.remove_role is not None
+    if wants_role_change:
+        try:
+            roles = await set_user_roles(
+                username,
+                set_roles=model.set_roles,
+                add_role=model.add_role,
+                remove_role=model.remove_role,
+            )
+        except ValueError as exc:
+            raise api_error(400, str(exc))
+        if roles is None:
+            raise api_error(404, f"User '{username}' not found.")
+    else:
+        roles = await get_roles_for_user(user.id)
 
     return {
         "message": "User updated successfully.",
         "user": {
-            "id": updated.id,
-            "username": updated.username,
-            "email": updated.email,
-            "roles": updated.roles,
-            "role": updated.role,
-            "login_rate_limit": updated.login_rate_limit,
-            "hash_algorithm": updated.hash_algorithm,
-            "hash_iterations": updated.hash_iterations,
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "roles": roles,
+            "role": roles[0] if roles else "",
+            "login_rate_limit": user.login_rate_limit,
+            "hash_algorithm": user.hash_algorithm,
+            "hash_iterations": user.hash_iterations,
         },
     }
 

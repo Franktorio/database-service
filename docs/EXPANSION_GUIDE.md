@@ -120,7 +120,7 @@ alembic upgrade head
 
 ## Step 3 — Write the CRUD layer
 
-`src/models/crud/notes/note_crud.py` — follow the exact shape used by `src/models/crud/system/user_crud.py`:
+`src/models/crud/notes/note_crud.py` — follow the exact shape used by `src/models/crud/system/user/user_crud.py`:
 
 ```python
 from sqlalchemy import select, delete

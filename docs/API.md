@@ -194,7 +194,7 @@ Partially update permission level, rate limit, and/or email.
 
 ## User Administration — `/api/db/users`
 
-All routes require **`SUPER_ADMIN` (level 4)** API key auth. Source: [`src/api/system/user_db_endpoints/routes/`](../src/api/system/user_db_endpoints/routes/).
+All routes require **`SUPER_ADMIN` (level 4)** API key auth. Source: [`src/api/system/user_db_endpoints/routes/`](../src/api/system/user_db_endpoints/routes/). Roles are stored in normalized `roles`/`user_roles` tables (see [DATABASE.md](DATABASE.md#roles--user_roles)), not on the user row itself — `roles`/`role` below are resolved on read, and `role` is always the oldest-granted (first) role.
 
 ### `GET /api/db/users`
 

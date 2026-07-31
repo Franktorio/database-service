@@ -10,6 +10,7 @@ The service uses **PostgreSQL** via **SQLAlchemy 2.0** (async, `asyncpg` driver)
 - [The `with_session` pattern](#the-with_session-pattern)
 - [Schema](#schema)
   - [`users`](#users)
+  - [`roles` / `user_roles`](#roles--user_roles)
   - [`api_keys`](#api_keys)
   - [`auth_cookies`](#auth_cookies)
   - [`audit_logs`](#audit_logs)
@@ -67,13 +68,15 @@ def with_session(func):
 This gives callers two modes:
 
 - **Fire-and-forget** — call `await get_user_by_username("alice")` with no session; a short-lived session is opened and closed automatically. This is what route handlers do.
-- **Explicit ownership** — pass `session=my_session` to compose multiple CRUD calls into **one transaction**. This is used, for example, by `update_user()` and `delete_user()`, which call `delete_auth_cookies_by_username(username, session=session)` using the *same* session/transaction so a user and their cookies are updated atomically.
+- **Explicit ownership** — pass `session=my_session` to compose multiple CRUD calls into **one transaction**. This is used, for example, by `update_user()`/`update_user_password()` (via `_apply_user_update()`) and `delete_user()`, which call `delete_auth_cookies_by_username(username, session=session)` using the *same* session/transaction so a user and their cookies are updated atomically. `set_user_roles()` in [`src/models/crud/system/user/user_crud.py`](../src/models/crud/system/user/user_crud.py) follows the same pattern across the `user`/`role`/`user_role` CRUD modules.
 
 **When adding new CRUD functions, follow this exact pattern** — accept `session: AsyncSession | None = None`, decorate with `@with_session`, and thread `session=session` through to any other CRUD calls you make internally so multi-step operations stay transactional.
 
 ## Schema
 
 ### `users`
+
+User accounts live under [`src/models/tables/system/users/`](../src/models/tables/system/users/) and [`src/models/crud/system/user/`](../src/models/crud/system/user/) — a dedicated sub-package, since this is the largest and most-connected domain in the schema (roles, auth cookies, audit logs all reference it).
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
@@ -85,11 +88,34 @@ This gives callers two modes:
 | `hash_iterations` | `Integer` | `NOT NULL`, default `210000` | stored per-user so the global default can change without invalidating existing hashes |
 | `hash_algorithm` | `String` | `NOT NULL`, default `"pbkdf2_sha256"` | only `pbkdf2_sha256` is currently implemented |
 | `login_rate_limit` | `Integer` | `NOT NULL`, default `10` | login attempts per `LOGIN_TIME_WINDOW` seconds |
-| `roles` | `ARRAY(String)` | `NOT NULL`, default `[]` | see note below |
 | `created_at` | `DateTime(timezone=True)` | `NOT NULL`, `server_default=now()` | DB-generated |
 | `last_updated_at` | `DateTime(timezone=True)` | `NOT NULL`, `server_default=now()`, `onupdate=now()` | DB-generated |
 
-> **`roles` is a Postgres array**, not a normalized join table. `User.role` is a convenience property returning `roles[0]` (or `""`), kept for backward compatibility with earlier single-role code. If your expansion needs role *metadata* (descriptions, permission sets, hierarchies) or efficient large-scale membership queries, plan a migration to a proper `roles`/`user_roles` table — see [Engineering Report §3](ENGINEERING_REPORT.md#3-database-design).
+> Roles are **not** a column on this table — see [`roles` / `user_roles`](#roles--user_roles) below. This used to be a `roles: ARRAY(String)` column; it was migrated to a normalized join table (see [Engineering Report §3](ENGINEERING_REPORT.md#3-database-design), now resolved) via [`d4f7a1c9b6e2_normalize_user_roles.py`](../migrations/versions/d4f7a1c9b6e2_normalize_user_roles.py), which also backfills existing array values.
+
+### `roles` / `user_roles`
+
+Normalized many-to-many role assignment, replacing the old `users.roles` Postgres array. `roles` holds the set of distinct role names (freeform — any string is accepted; a role row is auto-created the first time it's granted via `get_or_create_role()` in [`role_crud.py`](../src/models/crud/system/user/role_crud.py)); `user_roles` is the join table recording which user was granted which role and when.
+
+**`roles`**
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `Integer` | PK, auto | |
+| `name` | `String` | `NOT NULL`, **unique** | normalized to lowercase |
+| `description` | `String` | nullable, default `""` | not currently surfaced by any route |
+| `created_at` / `last_updated_at` | `DateTime(timezone=True)` | `NOT NULL`, `server_default=now()` | |
+
+**`user_roles`**
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `Integer` | PK, auto | |
+| `user_id` | `Integer` | `NOT NULL`, FK → `users.id` **(`ON DELETE CASCADE`)**, indexed | |
+| `role_id` | `Integer` | `NOT NULL`, FK → `roles.id` **(`ON DELETE CASCADE`)**, indexed | |
+| `created_at` / `last_updated_at` | `DateTime(timezone=True)` | `NOT NULL`, `server_default=now()` | `created_at` establishes grant order — the **oldest-granted role is treated as the user's "primary" role** (`roles[0]`) wherever a single role is needed (JWT `role` claim, permission payloads) |
+
+**Unique constraint:** `uq_user_roles_user_id_role_id` on `(user_id, role_id)` — a user can't be granted the same role twice. All role reads/writes go through [`user_role_crud.py`](../src/models/crud/system/user/user_role_crud.py) (`get_roles_for_user`, `get_roles_for_users` for bulk list-endpoint fetching, `assign_role_to_user`, `remove_role_from_user`, `replace_user_roles`); `user_crud.py`'s `set_user_roles()` orchestrates these plus cookie revocation and cache invalidation for the `PATCH /api/db/users/{username}` role fields.
 
 ### `api_keys`
 
@@ -138,6 +164,8 @@ Append-only trail of every mutating write made through the `system` admin CRUD m
 ```mermaid
 erDiagram
     USERS ||--o{ AUTH_COOKIES : "has sessions"
+    USERS ||--o{ USER_ROLES : "granted"
+    ROLES ||--o{ USER_ROLES : "granted to"
     USERS {
         int id PK
         string username UK
@@ -147,7 +175,20 @@ erDiagram
         int hash_iterations
         string hash_algorithm
         int login_rate_limit
-        array roles
+        datetime created_at
+        datetime last_updated_at
+    }
+    ROLES {
+        int id PK
+        string name UK
+        string description
+        datetime created_at
+        datetime last_updated_at
+    }
+    USER_ROLES {
+        int id PK
+        int user_id FK
+        int role_id FK
         datetime created_at
         datetime last_updated_at
     }
@@ -197,7 +238,7 @@ All ORM models inherit from `Base` and use `MappedAsDataclass`, which means:
 
 ## CRUD layer conventions
 
-Every table has a corresponding module under `src/models/crud/system/` (e.g. `user_crud.py`, `api_key_crud.py`, `auth_cookie_crud.py`) that is the **only** code allowed to import the ORM model and issue `select`/`update`/`delete` statements for that table. Route handlers and security modules never construct SQLAlchemy statements directly — they always call into a CRUD function.
+Every table has a corresponding module under `src/models/crud/system/` (e.g. `api_key_crud.py`, `auth_cookie_crud.py`) that is the **only** code allowed to import the ORM model and issue `select`/`update`/`delete` statements for that table. The `users`/`roles`/`user_roles` domain is large enough to warrant its own sub-package instead of flat files: [`src/models/crud/system/user/`](../src/models/crud/system/user/) holds `user_crud.py`, `role_crud.py`, and `user_role_crud.py`, mirroring the table layout under [`src/models/tables/system/users/`](../src/models/tables/system/users/). Route handlers and security modules never construct SQLAlchemy statements directly — they always call into a CRUD function.
 
 Conventions to follow when adding a new CRUD module (see [Expansion Guide](EXPANSION_GUIDE.md) for a full walkthrough):
 
@@ -215,7 +256,7 @@ All three tables now have Redis caches sitting in front of their hot read paths 
 | Table | Cached? | Cache key | Invalidated on |
 |---|---|---|---|
 | `api_keys` | ✅ Permission payload cached in Redis (`permissions:api_key:<hash>`), TTL `REDIS_PERMISSIONS_EX_SECONDS` (default 300s) | `_get_api_permission_payload()` in `api_security.py` | `add_api_key`, `update_api_key_by_id`, `delete_api_key_by_id` (via `cache_invalidating`/direct invalidation) |
-| `users` | ✅ Permission payload cached in Redis (`permissions:user:<username>`) | `_resolve_user_permissions()` / `_get_user_permission_payload()` | `add_user`, `update_user`, `delete_user`, `update_user_password`, `update_user_login_rate_limit` |
+| `users` (+ `roles`/`user_roles`) | ✅ Permission payload cached in Redis (`permissions:user:<username>`), including the resolved role list | `_resolve_user_permissions()` / `_get_user_permission_payload()` | `create_user`, `update_user`, `update_user_password`, `update_user_login_rate_limit`, `delete_user` (all in `user_crud.py`, via `cache_invalidating`); `set_user_roles()` invalidates directly since it doesn't return a `User`/bool matching the shared invalidator's shape |
 | `auth_cookies` | ✅ Validity payload cached in Redis (`permissions:cookie:<hash>` → `{username, user_id, revoked, expires_at}`) | `_resolve_cookie_row()` in `cookie_security.py` | `add_auth_cookie`, `revoke_auth_cookie`, `refresh_auth_cookie`, `revoke_expired_auth_cookies`, `delete_expired_auth_cookies`, `delete_auth_cookies_by_username` (via `invalidate_cookie_cache`) |
 
 ### Audit logging
