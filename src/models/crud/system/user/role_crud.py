@@ -10,23 +10,44 @@ from src.services.system.logging import log_message
 
 PRINT_PREFIX = "ROLE CRUD"
 
+@monitored(measuring="db", operation_type="write")
+@with_session
+async def create_role(name: str, description: str = "", session: AsyncSession | None = None) -> Role:
+    """Create a new role with the given name and description."""
+    normalized_name = name.strip().lower()
+    existing_role = await get_role_by_name(normalized_name, session=session)
+    if existing_role:
+        raise ValueError(f"Role '{normalized_name}' already exists.")
+
+    new_role = Role(name=normalized_name, description=description)
+    session.add(new_role)
+    await session.commit()
+    await session.refresh(new_role)
+    return new_role
+
 
 @monitored(measuring="db", operation_type="write")
 @with_session
-async def get_or_create_role(name: str, description: str = "", session: AsyncSession | None = None) -> Role:
-    """Fetch a role by name, creating it if it doesn't exist yet (roles are freeform, not pre-registered)."""
-    normalized_name = name.strip().lower()
-    stmt = select(Role).where(Role.name == normalized_name)
+async def update_role(role_id: int, new_name: str | None = None, new_description: str | None = None, session: AsyncSession | None = None) -> Role:
+    """Update an existing role's name and/or description."""
+    stmt = select(Role).where(Role.id == role_id)
     result = await session.execute(stmt)
     role = result.scalar_one_or_none()
-    if role is not None:
-        return role
+    if not role:
+        raise ValueError(f"Role with ID {role_id} does not exist.")
 
-    role = Role(name=normalized_name, description=description)
-    session.add(role)
+    if new_name:
+        normalized_name = new_name.strip().lower()
+        existing_role = await get_role_by_name(normalized_name, session=session)
+        if existing_role and existing_role.id != role_id:
+            raise ValueError(f"Role '{normalized_name}' already exists.")
+        role.name = normalized_name
+
+    if new_description is not None:
+        role.description = new_description
+
     await session.commit()
     await session.refresh(role)
-
     return role
 
 

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.system.monitoring import monitored
 from src.models.database import with_session
-from src.models.crud.system.user.role_crud import get_or_create_role, get_role_by_name
+from src.models.crud.system.user.role_crud import get_role_by_name
 from src.models.tables.system.users.roles_table import Role
 from src.models.tables.system.users.user_roles_table import UserRole
 from src.services.system.logging import log_message
@@ -53,7 +53,10 @@ async def get_roles_for_users(user_ids: list[int], session: AsyncSession | None 
 @with_session
 async def assign_role_to_user(user_id: int, role_name: str, session: AsyncSession | None = None) -> UserRole:
     """Grant a role to a user, creating the role if it doesn't exist yet. No-op if already assigned."""
-    role = await get_or_create_role(role_name, session=session)
+    role = await get_role_by_name(role_name, session=session)
+    
+    if role is None:
+        raise ValueError(f"Role '{role_name}' does not exist and cannot be assigned to user {user_id}.")
 
     stmt = select(UserRole).where(UserRole.user_id == user_id, UserRole.role_id == role.id)
     result = await session.execute(stmt)
@@ -93,7 +96,9 @@ async def replace_user_roles(user_id: int, role_names: list[str], session: Async
     """Replace a user's entire set of role assignments with `role_names` (creating any missing roles)."""
     await session.execute(delete(UserRole).where(UserRole.user_id == user_id))
     for role_name in role_names:
-        role = await get_or_create_role(role_name, session=session)
+        role = await get_role_by_name(role_name, session=session)
+        if role is None:
+            raise ValueError(f"Role '{role_name}' does not exist and cannot be assigned to user {user_id}.")
         session.add(UserRole(user_id=user_id, role_id=role.id))
     await session.commit()
 
