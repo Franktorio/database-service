@@ -16,6 +16,7 @@ from config.loader import (
 )
 from src.api.system.api_db_endpoints import routes as api_db_routes
 from src.api.system.user_db_endpoints import routes as user_db_routes
+from src.api.system.roles_db_endpoints import routes as roles_db_routes
 from src.api.system.audit_log_endpoints import routes as audit_log_routes
 from src.services.system.cache.redis.client import RedisClient
 
@@ -90,6 +91,7 @@ app = fastapi.FastAPI(
 )
 app.include_router(api_db_routes.router)
 app.include_router(user_db_routes.router)
+app.include_router(roles_db_routes.router)
 app.include_router(audit_log_routes.router)
 test_router = fastapi.APIRouter()
 

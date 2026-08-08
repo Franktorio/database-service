@@ -46,5 +46,17 @@ class RoleUpdateResponse(BaseModel):
 class RoleListResponse(BaseModel):
     """Response body for `GET /api/db/roles`."""
 
-    roles: list[RoleItem] = Field(default=[], description="All stored roles, present only when at least one exists.")
+    roles: list[RoleItem] | None = Field(default=None, description="All stored roles, present only when at least one exists.")
     message: str | None = Field(default=None, description="Optional informational message.")
+
+
+class RoleResponse(BaseModel):
+    """Response body for `GET /api/db/roles/{role_id}`."""
+
+    role: RoleItem = Field(..., description="The requested role.")
+
+
+class MessageResponse(BaseModel):
+    """Generic message-only response body, used for `DELETE /api/db/roles/{role_id}`."""
+
+    message: str = Field(..., description="Human-readable result message.")

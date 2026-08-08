@@ -95,7 +95,7 @@ User accounts live under [`src/models/tables/system/users/`](../src/models/table
 
 ### `roles` / `user_roles`
 
-Normalized many-to-many role assignment, replacing the old `users.roles` Postgres array. `roles` holds the set of distinct role names (freeform — any string is accepted; a role row is auto-created the first time it's granted via `get_or_create_role()` in [`role_crud.py`](../src/models/crud/system/user/role_crud.py)); `user_roles` is the join table recording which user was granted which role and when.
+Normalized many-to-many role assignment, replacing the old `users.roles` Postgres array. `roles` holds the set of distinct role names managed through [`role_crud.py`](../src/models/crud/system/user/role_crud.py) and exposed via `/api/db/roles`; `user_roles` is the join table recording which user was granted which role and when.
 
 **`roles`**
 
@@ -103,7 +103,7 @@ Normalized many-to-many role assignment, replacing the old `users.roles` Postgre
 |---|---|---|---|
 | `id` | `Integer` | PK, auto | |
 | `name` | `String` | `NOT NULL`, **unique** | normalized to lowercase |
-| `description` | `String` | nullable, default `""` | not currently surfaced by any route |
+| `description` | `String` | nullable, default `""` | surfaced by `/api/db/roles` list/get/create/update routes |
 | `created_at` / `last_updated_at` | `DateTime(timezone=True)` | `NOT NULL`, `server_default=now()` | |
 
 **`user_roles`**
@@ -115,7 +115,7 @@ Normalized many-to-many role assignment, replacing the old `users.roles` Postgre
 | `role_id` | `Integer` | `NOT NULL`, FK → `roles.id` **(`ON DELETE CASCADE`)**, indexed | |
 | `created_at` / `last_updated_at` | `DateTime(timezone=True)` | `NOT NULL`, `server_default=now()` | `created_at` establishes grant order — the **oldest-granted role is treated as the user's "primary" role** (`roles[0]`) wherever a single role is needed (JWT `role` claim, permission payloads) |
 
-**Unique constraint:** `uq_user_roles_user_id_role_id` on `(user_id, role_id)` — a user can't be granted the same role twice. All role reads/writes go through [`user_role_crud.py`](../src/models/crud/system/user/user_role_crud.py) (`get_roles_for_user`, `get_roles_for_users` for bulk list-endpoint fetching, `assign_role_to_user`, `remove_role_from_user`, `replace_user_roles`); `user_crud.py`'s `set_user_roles()` orchestrates these plus cookie revocation and cache invalidation for the `PATCH /api/db/users/{username}` role fields.
+**Unique constraint:** `uq_user_roles_user_id_role_id` on `(user_id, role_id)` — a user can't be granted the same role twice. All role reads/writes go through [`user_role_crud.py`](../src/models/crud/system/user/user_role_crud.py) (`get_roles_for_user`, `get_roles_for_users` for bulk list-endpoint fetching, `assign_role_to_user`, `remove_role_from_user`, `replace_user_roles`); `user_crud.py`'s `set_user_roles()` orchestrates these plus cookie revocation and cache invalidation for the `PATCH /api/db/users/{username}` role fields. Role definitions themselves are managed in [`role_crud.py`](../src/models/crud/system/user/role_crud.py) (`create_role`, `update_role`, `get_role_by_id`, `get_role_by_name`, `get_roles`, `delete_role_by_id`); `delete_role_by_id` rejects deletion while a role is still assigned.
 
 ### `api_keys`
 
