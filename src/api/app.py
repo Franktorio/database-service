@@ -25,7 +25,8 @@ from src.services.system.monitoring import monitored, get_monitoring_service
 from src.security.ip_block import with_ip_block
 from src.security.validation.password_security import auth_and_grant_token
 from src.security.validation.cookie_security import cookie_authorized_factory
-from src.security.tokens import get_cookie_settings
+from src.models.crud.system.auth_cookie_crud import revoke_auth_cookie
+from src.security.tokens import get_cookie_settings, hash_token
 from src.models.database import init_db, close_db
 from src.models.tables.system.api_key_table import ApiKey
 from src.services.supervisor import TaskSupervisor
@@ -42,7 +43,7 @@ from src.services.system.dbhealthcheck import (
     is_healthcheck_service_enabled,
 )
 
-from src.api.config import VIEW_LEVEL
+from src.api.config import VIEW_LEVEL, COOKIE_JWT_INDEX
 
 from src.api.models import CookieRequestData, LoginRequestBase
 from src.services.system.logging import log_message
@@ -122,6 +123,32 @@ async def health(request: Request):
     service = get_monitoring_service()
     json_response = JSONResponse(content=service.get_metrics())
     return json_response
+
+@app.post("/login")
+@monitored(measuring="api", operation_type="read")
+@with_ip_block
+async def login(login_request: LoginRequestBase, request: Request):
+    token, _ = await auth_and_grant_token(
+        username=login_request.username,
+        password=login_request.password,
+        ip_address=request.client.host if request.client else None,
+    )
+
+    response = JSONResponse(content={"message": "Login successful."})
+    response.set_cookie(**get_cookie_settings(), value=token)
+
+    return response
+
+@app.post("/logout")
+@monitored(measuring="api", operation_type="read")
+@with_ip_block
+async def logout(request: Request):
+    response = JSONResponse(content={"message": "Logout successful."})
+    response.delete_cookie(key=COOKIE_JWT_INDEX)
+    cookie_token = request.cookies.get(COOKIE_JWT_INDEX)
+    if cookie_token:
+        await revoke_auth_cookie(hash_token(cookie_token))
+    return response
 
 @test_router.post("/api-auth-test")
 @monitored(measuring="api", operation_type="read")

@@ -1,15 +1,15 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, Request
 
-from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
+from config.loader import COOKIE_DEFAULT_RATE_LIMIT, JWT_EXP_MINUTES, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
 from src.api.errors import api_error
 from src.api.models import CookieRequestData
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.audit_context import set_audit_actor
 from src.models.crud.cache_invalidation import cookie_identifier, user_identifier
-from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
+from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash, update_expires_at_for_auth_cookie
 from src.models.crud.system.user.user_crud import get_user_by_id, get_user_by_username
 from src.models.crud.system.user.user_role_crud import get_roles_for_user
 from src.security.extract import extract_client_ip, extract_cookie_value
@@ -248,7 +248,7 @@ async def get_current_cookie_data(
         username=username,
         user_id=cookie_row["user_id"],
         role=effective_role,
-        token_hash=token_hash[:12],
+        token_hash=token_hash,
         rate_limit=COOKIE_DEFAULT_RATE_LIMIT,
     )
 
@@ -282,6 +282,10 @@ def cookie_authorized_factory(required_roles: set[str] | None = None):
 
         request.state.cookie_data = cookie_data
         set_audit_actor(user_id=cookie_data.user_id, ip_address=extract_client_ip(request))
+        await update_expires_at_for_auth_cookie(
+            token_hash=cookie_data.token_hash,
+            new_expires_at=datetime.now(timezone.utc) + timedelta(minutes=JWT_EXP_MINUTES),
+        )
         return cookie_data
 
     return cookie_authorized

@@ -12,6 +12,7 @@ from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.security.tokens import hash_password
 from src.models.tables.system.api_key_table import ApiKey
+from src.models.database import session_depends
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
@@ -19,8 +20,8 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @router.post("", response_model=UserCreateResponse)
 @monitored(measuring="api", operation_type="write")
 @with_ip_block
-async def create_user_route(request: Request, model: UserCreateRequest, api_key: ApiKey = Depends(require_super_admin)):
-    existing_user = await get_user_by_username(model.username)
+async def create_user_route(request: Request, model: UserCreateRequest, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
+    existing_user = await get_user_by_username(model.username, session=session)
     if existing_user is not None:
         raise api_error(409, f"User '{model.username}' already exists.")
 
@@ -37,8 +38,9 @@ async def create_user_route(request: Request, model: UserCreateRequest, api_key:
         email=model.email,
         initial_role=model.initial_role,
         login_rate_limit=model.login_rate_limit,
+        session=session,
     )
-    roles = await get_roles_for_user(created_user.id)
+    roles = await get_roles_for_user(created_user.id, session=session)
 
     return {
         "message": "User created successfully.",

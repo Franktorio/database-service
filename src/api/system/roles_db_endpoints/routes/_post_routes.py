@@ -9,6 +9,7 @@ from src.models.tables.system.api_key_table import ApiKey
 from src.security.ip_block import with_ip_block
 from src.security.validation.api_security import api_key_authorized_factory
 from src.services.system.monitoring import monitored
+from src.models.database import session_depends
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
@@ -16,9 +17,9 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @router.post("", response_model=RoleCreateResponse)
 @monitored(measuring="api", operation_type="write")
 @with_ip_block
-async def create_role_route(request: Request, model: RoleCreateRequest, api_key: ApiKey = Depends(require_super_admin)):
+async def create_role_route(request: Request, model: RoleCreateRequest, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
 	try:
-		role = await create_role(name=model.name, description=model.description)
+		role = await create_role(name=model.name, description=model.description, session=session)
 	except ValueError as exc:
 		raise api_error(409, str(exc))
 

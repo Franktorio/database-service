@@ -13,6 +13,7 @@ from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.models.crud.system.audit_log_crud import get_audit_log_by_id, get_audit_logs
 from src.models.tables.system.api_key_table import ApiKey
+from src.models.database import session_depends
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
@@ -25,8 +26,9 @@ async def list_audit_logs(
     limit: int = Query(default=100, ge=1, le=500, description="Maximum number of entries to return."),
     offset: int = Query(default=0, ge=0, description="Number of entries to skip, most-recent-first."),
     api_key: ApiKey = Depends(require_super_admin),
+    session=Depends(session_depends),
 ):
-    audit_logs = await get_audit_logs(limit=limit, offset=offset)
+    audit_logs = await get_audit_logs(limit=limit, offset=offset, session=session)
     if not audit_logs:
         return {"message": "No audit logs found."}
 
@@ -36,8 +38,8 @@ async def list_audit_logs(
 @router.get("/{log_id}", response_model=AuditLogResponse)
 @monitored(measuring="api", operation_type="read")
 @with_ip_block
-async def get_audit_log(log_id: int, request: Request, api_key: ApiKey = Depends(require_super_admin)):
-    audit_log = await get_audit_log_by_id(log_id)
+async def get_audit_log(log_id: int, request: Request, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
+    audit_log = await get_audit_log_by_id(log_id, session=session)
     if audit_log is None:
         raise api_error(404, f"Audit log '{log_id}' not found.")
 

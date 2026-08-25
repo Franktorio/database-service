@@ -9,6 +9,7 @@ from src.models.crud.system.user.user_crud import delete_user
 from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.models.tables.system.api_key_table import ApiKey
+from src.models.database import session_depends
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
@@ -16,8 +17,8 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @router.delete("/{username}", response_model=MessageResponse)
 @monitored(measuring="api", operation_type="write")
 @with_ip_block
-async def remove_user(request: Request, username: str, api_key: ApiKey = Depends(require_super_admin)):
-    deleted = await delete_user(username)
+async def remove_user(request: Request, username: str, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
+    deleted = await delete_user(username, session=session)
     if not deleted:
         raise api_error(404, f"User '{username}' not found.")
 

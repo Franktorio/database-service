@@ -9,6 +9,7 @@ from src.models.tables.system.api_key_table import ApiKey
 from src.security.ip_block import with_ip_block
 from src.security.validation.api_security import api_key_authorized_factory
 from src.services.system.monitoring import monitored
+from src.models.database import session_depends
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
@@ -16,8 +17,8 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @router.get("", response_model=RoleListResponse, response_model_exclude_none=True)
 @monitored(measuring="api", operation_type="read")
 @with_ip_block
-async def list_roles(request: Request, api_key: ApiKey = Depends(require_super_admin)):
-    roles = await get_roles()
+async def list_roles(request: Request, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
+    roles = await get_roles(session=session)
     if not roles:
         return {"message": "No roles found."}
 
@@ -38,8 +39,8 @@ async def list_roles(request: Request, api_key: ApiKey = Depends(require_super_a
 @router.get("/{role_id}", response_model=RoleResponse)
 @monitored(measuring="api", operation_type="read")
 @with_ip_block
-async def get_role(role_id: int, request: Request, api_key: ApiKey = Depends(require_super_admin)):
-    role = await get_role_by_id(role_id)
+async def get_role(role_id: int, request: Request, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
+    role = await get_role_by_id(role_id, session=session)
     if role is None:
         raise api_error(404, f"Role '{role_id}' not found.")
 

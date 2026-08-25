@@ -9,6 +9,7 @@ from src.models.tables.system.api_key_table import ApiKey
 from src.security.ip_block import with_ip_block
 from src.security.validation.api_security import api_key_authorized_factory
 from src.services.system.monitoring import monitored
+from src.models.database import session_depends
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
@@ -16,16 +17,16 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @router.put("/{role_id}", response_model=RoleUpdateResponse)
 @monitored(measuring="api", operation_type="write")
 @with_ip_block
-async def put_role(role_id: int, request: Request, model: RoleUpdateRequest, api_key: ApiKey = Depends(require_super_admin)):
+async def put_role(role_id: int, request: Request, model: RoleUpdateRequest, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
     if model.new_name is None and model.new_description is None:
         raise api_error(400, "At least one of 'new_name' or 'new_description' must be provided.")
 
-    existing_role = await get_role_by_id(role_id)
+    existing_role = await get_role_by_id(role_id, session=session)
     if existing_role is None:
         raise api_error(404, f"Role '{role_id}' not found.")
 
     try:
-        role = await update_role(role_id=role_id, new_name=model.new_name, new_description=model.new_description)
+        role = await update_role(role_id=role_id, new_name=model.new_name, new_description=model.new_description, session=session)
     except ValueError as exc:
         raise api_error(409, str(exc))
 

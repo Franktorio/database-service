@@ -12,6 +12,7 @@ from src.security.ip_block import with_ip_block
 from src.api.system.api_db_endpoints.models import ApiKeyCreateRequest, ApiKeyPatchRequest, ApiKeyCreateResponse, ApiKeyPatchResponse
 from src.models.crud.system.api_key_crud import update_api_key_by_id
 from src.models.tables.system.api_key_table import ApiKey
+from src.models.database import session_depends
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
@@ -19,7 +20,7 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @router.post("", response_model=ApiKeyCreateResponse)
 @monitored(measuring="api", operation_type="write")
 @with_ip_block
-async def create_key(request: Request, model: ApiKeyCreateRequest, api_key: ApiKey = Depends(require_super_admin)):
+async def create_key(request: Request, model: ApiKeyCreateRequest, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
     if model.permission_level >= SUPER_ADMIN_LEVEL:
         raise api_error(403, "SUPER_ADMIN keys can only be created from the bootstrap script.")
 
@@ -27,6 +28,7 @@ async def create_key(request: Request, model: ApiKeyCreateRequest, api_key: ApiK
         permission_level=model.permission_level,
         rate_limit=model.rate_limit,
         email=model.email,
+        session=session,
     )
 
     return {
@@ -45,7 +47,7 @@ async def create_key(request: Request, model: ApiKeyCreateRequest, api_key: ApiK
 @router.patch("/{key_id}", response_model=ApiKeyPatchResponse)
 @monitored(measuring="api", operation_type="write")
 @with_ip_block
-async def patch_key(request: Request, key_id: int, model: ApiKeyPatchRequest, api_key: ApiKey = Depends(require_super_admin)):
+async def patch_key(request: Request, key_id: int, model: ApiKeyPatchRequest, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
     if model.new_permission_level is not None and model.new_permission_level >= SUPER_ADMIN_LEVEL:
         raise api_error(403, "SUPER_ADMIN keys can only be created from the bootstrap script.")
 
@@ -54,6 +56,7 @@ async def patch_key(request: Request, key_id: int, model: ApiKeyPatchRequest, ap
         new_permission_level=model.new_permission_level,
         new_rate_limit=model.new_rate_limit,
         new_email=model.new_email,
+        session=session,
     )
 
     if updated_api_key is None:

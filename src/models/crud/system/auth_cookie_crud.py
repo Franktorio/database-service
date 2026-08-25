@@ -117,6 +117,26 @@ async def refresh_auth_cookie(
 
     return row
 
+@monitored(measuring="db", operation_type="write")
+@with_session
+async def update_expires_at_for_auth_cookie(
+    token_hash: str,
+    new_expires_at: datetime,
+    session: AsyncSession | None = None,
+) -> AuthCookie | None:
+    """Update the expiration time for a cookie JWT tracking row."""
+    stmt = select(AuthCookie).where(AuthCookie.token_hash == token_hash)
+    result = await session.execute(stmt)
+    row = result.scalar_one_or_none()
+    if row is None:
+        log_message(f"[WARNING] [{PRINT_PREFIX}] No auth cookie found to update expiration.")
+        return None
+
+    row.expires_at = new_expires_at
+    await session.commit()
+    await session.refresh(row)
+
+    return row
 
 @monitored(measuring="db", operation_type="write")
 @with_session

@@ -1,7 +1,7 @@
 # ~/src/security/password_security.py
 # Decorator orchestrator for password validation and rate limiting.
 
-from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW
+from config.loader import LOGIN_ATTEMPTS_LIMIT, LOGIN_TIME_WINDOW, JWT_EXP_MINUTES
 from src.api.errors import api_error
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.cache_invalidation import password_identifier, user_identifier
@@ -121,7 +121,7 @@ async def auth_and_grant_token(username: str, password: str, ip_address: str, ex
     token = await create_cookie_token(
         username=user.username,
         role=roles[0] if roles else "",
-        expires_minutes=expiration or 10,
+        expires_minutes=expiration or JWT_EXP_MINUTES,
     )
-    return token, (expiration or 10)
+    return token, (expiration or JWT_EXP_MINUTES)
     

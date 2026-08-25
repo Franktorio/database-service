@@ -10,6 +10,7 @@ from src.models.crud.system.user.user_role_crud import get_roles_for_user, get_r
 from src.security.validation.api_security import api_key_authorized_factory
 from src.security.ip_block import with_ip_block
 from src.models.tables.system.api_key_table import ApiKey
+from src.models.database import session_depends
 
 require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 
@@ -17,12 +18,12 @@ require_super_admin = api_key_authorized_factory(SUPER_ADMIN_LEVEL)
 @router.get("", response_model=UserListResponse, response_model_exclude_none=True)
 @monitored(measuring="api", operation_type="read")
 @with_ip_block
-async def list_users(request: Request, api_key: ApiKey = Depends(require_super_admin)):
-    users = await get_users()
+async def list_users(request: Request, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
+    users = await get_users(session=session)
     if not users:
         return {"message": "No users found."}
 
-    roles_by_user = await get_roles_for_users([user.id for user in users])
+    roles_by_user = await get_roles_for_users([user.id for user in users], session=session)
 
     return {
         "users": [
@@ -46,12 +47,12 @@ async def list_users(request: Request, api_key: ApiKey = Depends(require_super_a
 @router.get("/{username}", response_model=UserResponse)
 @monitored(measuring="api", operation_type="read")
 @with_ip_block
-async def get_user(username: str, request: Request, api_key: ApiKey = Depends(require_super_admin)):
-    user = await get_user_by_username(username)
+async def get_user(username: str, request: Request, api_key: ApiKey = Depends(require_super_admin), session=Depends(session_depends)):
+    user = await get_user_by_username(username, session=session)
     if user is None:
         raise api_error(404, f"User '{username}' not found.")
 
-    roles = await get_roles_for_user(user.id)
+    roles = await get_roles_for_user(user.id, session=session)
 
     return {
         "user": {

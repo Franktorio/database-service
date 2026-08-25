@@ -52,6 +52,12 @@ def with_session(func):
     return wrapper
 
 
+async def session_depends():
+    """FastAPI dependency yielding a single AsyncSession, reused across all CRUD calls in a request."""
+    async with SessionLocal() as session:
+        yield session
+
+
 async def init_db():
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
