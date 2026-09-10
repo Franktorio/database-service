@@ -1,6 +1,7 @@
 # ~/src/services/system/monitoring.py
 
 import time
+from datetime import datetime, timezone
 from functools import wraps
 from collections import deque
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ ALLOWED = MONITORING_SETTINGS.ALLOWED
 
 @dataclass(slots=True)
 class EndpointMetaData:
+    recorded_at: datetime
     func_name: str
     method: str
     was_exception: bool
@@ -26,6 +28,7 @@ class EndpointMetaData:
 
 @dataclass(slots=True)
 class OperationMetaData:
+    recorded_at: datetime
     func_name: str
     operation_type: Literal["read", "write"]
     was_exception: bool
@@ -34,6 +37,7 @@ class OperationMetaData:
 
 @dataclass(slots=True)
 class RedisOperationMetaData:
+    recorded_at: datetime
     func_name: str
     operation_type: Literal["read", "write"]
     cache_miss: bool
@@ -179,6 +183,50 @@ class MonitoringService:
             "redis_operation_data": list(self.redis_operation_data),
         }
 
+    def get_snapshot(self) -> dict:
+        """Return the versioned, JSON-ready monitoring contract used by dashboards."""
+        recent = self.get_recent_samples()
+        return {
+            "schema_version": 1,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "metrics": dict(self.metrics),
+            "recent": {
+                "api": [
+                    {
+                        "recorded_at": sample.recorded_at.isoformat(),
+                        "func_name": sample.func_name,
+                        "method": sample.method,
+                        "was_exception": sample.was_exception,
+                        "response_time": sample.response_time,
+                        "response_status_code": sample.response_status_code,
+                    }
+                    for sample in recent["api_data"]
+                ],
+                "database": [
+                    {
+                        "recorded_at": sample.recorded_at.isoformat(),
+                        "func_name": sample.func_name,
+                        "operation_type": sample.operation_type,
+                        "was_exception": sample.was_exception,
+                        "operation_time": sample.operation_time,
+                    }
+                    for sample in recent["operation_data"]
+                ],
+                "redis": [
+                    {
+                        "recorded_at": sample.recorded_at.isoformat(),
+                        "func_name": sample.func_name,
+                        "operation_type": sample.operation_type,
+                        "cache_miss": sample.cache_miss,
+                        "was_exception": sample.was_exception,
+                        "response_status_code": sample.response_status_code,
+                        "operation_time": sample.operation_time,
+                    }
+                    for sample in recent["redis_operation_data"]
+                ],
+            },
+        }
+
 _monitoring_service = MonitoringService()
 
 
@@ -197,6 +245,11 @@ def monitored(measuring: Literal["api", "db", "redis"], operation_type: Literal[
             start_time = time.perf_counter()
             was_exception = False
             response_status_code = 200  # Default to 200, can be overridden
+            request = next(
+                (value for value in (*args, *kwargs.values()) if hasattr(value, "method")),
+                None,
+            )
+            request_method = getattr(request, "method", "GET")
             
             result = None  # Initialize result to None in case of exceptions before assignment
             
@@ -220,8 +273,9 @@ def monitored(measuring: Literal["api", "db", "redis"], operation_type: Literal[
 
                 if measuring == "api":
                     metadata = EndpointMetaData(
+                        recorded_at=datetime.now(timezone.utc),
                         func_name=func.__name__,
-                        method=kwargs.get("method", "GET"),
+                        method=request_method,
                         was_exception=was_exception,
                         response_time=elapsed_time,
                         response_status_code=response_status_code,
@@ -229,6 +283,7 @@ def monitored(measuring: Literal["api", "db", "redis"], operation_type: Literal[
                     _monitoring_service.record_endpoint(metadata)
                 elif measuring == "db":
                     metadata = OperationMetaData(
+                        recorded_at=datetime.now(timezone.utc),
                         func_name=func.__name__,
                         operation_type=operation_type,
                         was_exception=was_exception,
@@ -238,6 +293,7 @@ def monitored(measuring: Literal["api", "db", "redis"], operation_type: Literal[
                 elif measuring == "redis":
                     cache_miss = result is None or result == NOT_FOUND  # Assuming a cache miss if the result is None or NOT_FOUND
                     metadata = RedisOperationMetaData(
+                        recorded_at=datetime.now(timezone.utc),
                         func_name=func.__name__,
                         operation_type=operation_type,
                         cache_miss=cache_miss,

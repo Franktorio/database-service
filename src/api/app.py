@@ -124,6 +124,14 @@ async def health(request: Request):
     json_response = JSONResponse(content=service.get_metrics())
     return json_response
 
+@app.get("/monitoring/metrics")
+@monitored(measuring="api", operation_type="read")
+@with_ip_block
+async def remote_metrics(request: Request, api_key: ApiKey = Depends(api_key_authorized_factory(VIEW_LEVEL))):
+    """Versioned monitoring contract for authorized remote collectors."""
+    _ = api_key
+    return get_monitoring_service().get_snapshot()
+
 @app.post("/login")
 @monitored(measuring="api", operation_type="read")
 @with_ip_block

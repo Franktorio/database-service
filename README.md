@@ -209,6 +209,7 @@ Detailed, deep-dive documentation lives in [`docs/`](docs/):
 - **[`docs/API.md`](docs/API.md)** — Full reference for every HTTP endpoint (auth, request/response shapes, status codes).
 - **[`docs/DATABASE.md`](docs/DATABASE.md)** — Schema reference, SQLAlchemy conventions, migration workflow.
 - **[`docs/EXPANSION_GUIDE.md`](docs/EXPANSION_GUIDE.md)** — How to add new, product-specific features (tables, CRUD, routes) without touching the `system` layer.
+- **[`docs/MONITORING.md`](docs/MONITORING.md)** — Versioned remote monitoring contract and collector safety guidance.
 
 ## License
 
