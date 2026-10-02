@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.crud.cache_invalidation import (
     cache_invalidating,
     invalidate_cookie_cache,
+    invalidate_cookie_permission_cache,
     invalidate_user_permission_cache,
 )
 from src.models.tables.system.auth_cookie_table import AuthCookie
@@ -125,7 +126,11 @@ async def update_expires_at_for_auth_cookie(
     session: AsyncSession | None = None,
 ) -> AuthCookie | None:
     """Update the expiration time for a cookie JWT tracking row."""
-    stmt = select(AuthCookie).where(AuthCookie.token_hash == token_hash)
+    stmt = select(AuthCookie).where(
+        AuthCookie.token_hash == token_hash,
+        AuthCookie.revoked.is_(False),
+        AuthCookie.expires_at > datetime.now(timezone.utc),
+    )
     result = await session.execute(stmt)
     row = result.scalar_one_or_none()
     if row is None:
@@ -134,6 +139,7 @@ async def update_expires_at_for_auth_cookie(
 
     row.expires_at = new_expires_at
     await session.commit()
+    await invalidate_cookie_permission_cache(token_hash)
     await session.refresh(row)
 
     return row

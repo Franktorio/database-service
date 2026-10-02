@@ -12,6 +12,7 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import json
+import math
 import socket
 import ssl
 from dataclasses import dataclass
@@ -70,7 +71,7 @@ def validate_outbound_url(
 
     try:
         hostname = parsed.hostname.encode("idna").decode("ascii").lower()
-        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+        port = parsed.port if parsed.port is not None else (443 if parsed.scheme.lower() == "https" else 80)
     except (UnicodeError, ValueError) as exc:
         raise UnsafeOutboundUrl("The URL host or port is invalid.") from exc
     if not 1 <= port <= 65535:
@@ -135,9 +136,12 @@ def _host_header(destination: ValidatedDestination) -> str:
     return host if destination.port == default_port else f"{host}:{destination.port}"
 
 
-def get_json(
+def request_json(
     url: str,
     *,
+    method: str = "GET",
+    json_payload: dict | None = None,
+    max_request_bytes: int = 8 * 1024 * 1024,
     headers: Mapping[str, str] | None = None,
     query: Mapping[str, str] | None = None,
     allow_http: bool = False,
@@ -146,7 +150,20 @@ def get_json(
     read_timeout: float = 8.0,
     max_response_bytes: int = MAX_JSON_RESPONSE_BYTES,
 ) -> tuple[int, dict]:
-    """GET JSON from a validated, DNS-pinned destination without redirects."""
+    """Request bounded JSON from a validated, DNS-pinned destination without redirects."""
+    if method not in {"GET", "POST"}:
+        raise ValueError("Only GET and POST are supported.")
+    if not all(math.isfinite(value) and value > 0 for value in (connect_timeout, read_timeout)):
+        raise ValueError("Outbound timeouts must be finite and positive.")
+    if max_response_bytes <= 0 or max_request_bytes <= 0:
+        raise ValueError("Outbound size limits must be positive.")
+    request_body = None
+    if json_payload is not None:
+        if not isinstance(json_payload, dict):
+            raise ValueError("The outbound JSON request must be an object.")
+        request_body = json.dumps(json_payload, allow_nan=False).encode("utf-8")
+        if len(request_body) > max_request_bytes:
+            raise OutboundResponseError("The outbound request exceeded the size limit.")
     destination = validate_outbound_url(
         url,
         allow_http=allow_http,
@@ -156,6 +173,8 @@ def get_json(
     address = destination.addresses[0]
     request_headers = {"Accept": "application/json", **(headers or {})}
     request_headers["Host"] = _host_header(destination)
+    if request_body is not None:
+        request_headers["Content-Type"] = "application/json"
 
     if destination.parsed.scheme.lower() == "https":
         connection: http.client.HTTPConnection = _PinnedHTTPSConnection(
@@ -170,10 +189,15 @@ def get_json(
         connection.connect()
         if connection.sock is not None:
             connection.sock.settimeout(read_timeout)
-        connection.request("GET", _request_target(destination.parsed, query), headers=request_headers)
+        request_options = {"headers": request_headers}
+        if request_body is not None:
+            request_options["body"] = request_body
+        connection.request(method, _request_target(destination.parsed, query), **request_options)
         response = connection.getresponse()
-        body = response.read(max_response_bytes + 1)
         status = response.status
+        if 300 <= status < 400:
+            raise OutboundResponseError("Outbound redirects are not allowed.")
+        body = response.read(max_response_bytes + 1)
     except (OSError, http.client.HTTPException) as exc:
         raise OutboundResponseError("The outbound request failed.") from exc
     finally:
@@ -188,3 +212,13 @@ def get_json(
     if not isinstance(payload, dict):
         raise OutboundResponseError("The outbound JSON response must be an object.")
     return status, payload
+
+
+def get_json(url: str, **kwargs) -> tuple[int, dict]:
+    """GET JSON using the shared destination and response protections."""
+    return request_json(url, method="GET", **kwargs)
+
+
+def post_json(url: str, *, json_payload: dict, **kwargs) -> tuple[int, dict]:
+    """POST JSON using the shared destination and response protections."""
+    return request_json(url, method="POST", json_payload=json_payload, **kwargs)

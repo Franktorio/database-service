@@ -76,6 +76,13 @@ REDIS_RATELIMIT_EX_SECONDS: int = int(os.getenv('REDIS_RATELIMIT_EX_SECONDS', '3
 REDIS_PERMISSIONS_EX_SECONDS: int = int(os.getenv('REDIS_PERMISSIONS_EX_SECONDS', '300'))
 REDIS_IP_BLOCK_EX_SECONDS: int = int(os.getenv('REDIS_IP_BLOCK_EX_SECONDS', '3600'))
 
+# Transactional email (Brevo)
+PUBLIC_APP_URL: str = os.getenv('PUBLIC_APP_URL', 'http://localhost:8000').rstrip('/')
+BREVO_API_KEY: str = os.getenv('BREVO_API_KEY', '')
+BREVO_FROM_EMAIL: str = os.getenv('BREVO_FROM_EMAIL', '')
+BREVO_FROM_NAME: str = os.getenv('BREVO_FROM_NAME', 'Database Service')
+BREVO_REQUEST_TIMEOUT_SECONDS: float = float(os.getenv('BREVO_REQUEST_TIMEOUT_SECONDS', '10'))
+
 # Async Task Supervisor Configuration
 DEFAULT_TASK_RESTART_ATTEMPTS: int = int(os.getenv('DEFAULT_TASK_RESTART_ATTEMPTS', '5'))
 DEFAULT_TASK_RESTART_DELAY: int = int(os.getenv('DEFAULT_TASK_RESTART_DELAY', '1')) # Multiplied by 2 for each restart

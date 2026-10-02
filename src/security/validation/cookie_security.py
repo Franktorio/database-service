@@ -1,19 +1,19 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import Depends, Request
 
-from config.loader import COOKIE_DEFAULT_RATE_LIMIT, JWT_EXP_MINUTES, RATE_LIMIT_WINDOW_SECONDS
+from config.loader import COOKIE_DEFAULT_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS
 from src.api.config import COOKIE_JWT_INDEX
 from src.api.errors import api_error
 from src.api.models import CookieRequestData
 from src.services.system.logging import log_message_for_ip
 from src.models.crud.audit_context import set_audit_actor
 from src.models.crud.cache_invalidation import cookie_identifier, user_identifier
-from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash, update_expires_at_for_auth_cookie
+from src.models.crud.system.auth_cookie_crud import get_auth_cookie_by_hash
 from src.models.crud.system.user.user_crud import get_user_by_id, get_user_by_username
 from src.models.crud.system.user.user_role_crud import get_roles_for_user
 from src.security.extract import extract_client_ip, extract_cookie_value
-from src.security.tokens import decode_jwt_token, hash_token
+from src.security.tokens import cookie_session_hash, decode_jwt_token
 
 from src.services.system.cache.permissionscache import (
     cache_permission_json,
@@ -137,10 +137,14 @@ async def get_cookie_claims(
         log_message_for_ip(client_ip, "Cookie authentication failed: invalid user_id claim", PRINT_PREFIX, level="WARNING")
         raise api_error(401, "Invalid cookie token payload.")
 
+    session_id = token_payload.get("sid")
+    if session_id is not None and (not isinstance(session_id, str) or len(session_id) < 32):
+        raise api_error(401, "Invalid cookie token payload.")
+
     return {
         "username": username_claim,
         "user_id": user_id_claim,
-        "token_hash": hash_token(cookie_token),
+        "token_hash": cookie_session_hash(cookie_token, token_payload),
     }
 
 
@@ -282,10 +286,6 @@ def cookie_authorized_factory(required_roles: set[str] | None = None):
 
         request.state.cookie_data = cookie_data
         set_audit_actor(user_id=cookie_data.user_id, ip_address=extract_client_ip(request))
-        await update_expires_at_for_auth_cookie(
-            token_hash=cookie_data.token_hash,
-            new_expires_at=datetime.now(timezone.utc) + timedelta(minutes=JWT_EXP_MINUTES),
-        )
         return cookie_data
 
     return cookie_authorized

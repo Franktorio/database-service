@@ -89,6 +89,7 @@ def create_jwt_token(
     role: str,
     user_id: int | None = None,
     expires_minutes: int = JWT_EXP_MINUTES,
+    session_id: str | None = None,
 ) -> tuple[str, datetime]:
     """Create a signed JWT token for cookie authentication."""
     now = datetime.now(timezone.utc)
@@ -98,9 +99,12 @@ def create_jwt_token(
         "role": role,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
+        "jti": secrets.token_urlsafe(16),
     }
     if user_id is not None:
         payload["user_id"] = user_id
+    if session_id is not None:
+        payload["sid"] = session_id
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return token, expires_at
 
@@ -117,6 +121,13 @@ def decode_jwt_token(token: str) -> dict | None:
         return None
 
 
+def cookie_session_hash(token: str, payload: dict | None = None) -> str:
+    """Resolve the tracked session for current JWTs and older token-hash sessions."""
+    claims = payload if payload is not None else decode_jwt_token(token)
+    session_id = claims.get("sid") if isinstance(claims, dict) else None
+    return hash_token(session_id if isinstance(session_id, str) and session_id else token)
+
+
 async def create_cookie_token(
     username: str,
     role: str,
@@ -128,13 +139,15 @@ async def create_cookie_token(
         log_message(f"[WARNING] [API KEYS] Cannot create cookie token for unknown user {username}.")
         raise ValueError("Cannot create cookie token for unknown user.")
 
+    session_id = secrets.token_urlsafe(32)
     token, expires_at = create_jwt_token(
         username=user.username,
         role=role,
         user_id=user.id,
         expires_minutes=expires_minutes,
+        session_id=session_id,
     )
-    token_hash = hash_token(token)
+    token_hash = hash_token(session_id)
     await add_auth_cookie(
         token_hash=token_hash,
         user=user,

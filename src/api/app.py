@@ -26,7 +26,8 @@ from src.security.ip_block import with_ip_block
 from src.security.validation.password_security import auth_and_grant_token
 from src.security.validation.cookie_security import cookie_authorized_factory
 from src.models.crud.system.auth_cookie_crud import revoke_auth_cookie
-from src.security.tokens import get_cookie_settings, hash_token
+from src.security.tokens import cookie_session_hash, get_cookie_settings
+from src.security.sessions import refresh_session, session_metadata
 from src.models.database import init_db, close_db
 from src.models.tables.system.api_key_table import ApiKey
 from src.services.supervisor import TaskSupervisor
@@ -155,8 +156,24 @@ async def logout(request: Request):
     response.delete_cookie(key=COOKIE_JWT_INDEX)
     cookie_token = request.cookies.get(COOKIE_JWT_INDEX)
     if cookie_token:
-        await revoke_auth_cookie(hash_token(cookie_token))
+        await revoke_auth_cookie(cookie_session_hash(cookie_token))
     return response
+
+@app.get("/me")
+@monitored(measuring="api", operation_type="read")
+@with_ip_block
+async def get_me(request: Request, cookie_data: CookieRequestData = Depends(cookie_authorized_factory())):
+    return {"user_id": cookie_data.user_id, "username": cookie_data.username,
+            "role": cookie_data.role, "roles": getattr(cookie_data, "roles", [cookie_data.role]),
+            **session_metadata(request)}
+
+
+@app.post("/me/refresh")
+@monitored(measuring="api", operation_type="write")
+@with_ip_block
+async def refresh_me(request: Request, cookie_data: CookieRequestData = Depends(cookie_authorized_factory())):
+    return await refresh_session(request, cookie_data)
+
 
 @test_router.post("/api-auth-test")
 @monitored(measuring="api", operation_type="read")

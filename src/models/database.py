@@ -1,5 +1,7 @@
 # ~/src/models/database.py
 
+from functools import wraps
+
 from config.loader import (
     DATABASE_URL,
     OPERATING_MODE,
@@ -34,6 +36,7 @@ SessionLocal = async_sessionmaker(
 )
 
 def with_session(func):
+    @wraps(func)
     async def wrapper(*args, **kwargs):
         session = kwargs.get("session")
         close_session = False

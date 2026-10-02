@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from config.settings import MONITORING_SETTINGS
+from src.services.system.logging import log_message
 
 NOT_FOUND = MONITORING_SETTINGS.NOT_FOUND
 INVALID_DATA = MONITORING_SETTINGS.INVALID_DATA
@@ -259,28 +260,43 @@ def monitored(measuring: Literal["api", "db", "redis"], operation_type: Literal[
                     response_status_code = getattr(result, "status_code", 200)
                 return result
             except Exception as e:
-                print(f"Exception in monitored function '{func.__name__}': {e}")
                 if measuring == "api":
                     response_status_code = getattr(e, "status_code", 500)
                     if response_status_code >= 500: # Count server errors as exceptions
                         was_exception = True 
                 else:
                     was_exception = True
+                if measuring == "api":
+                    request_path = getattr(request, "scope", {}).get("path", "unknown")
+                    level = "ERROR" if response_status_code >= 500 else "WARNING"
+                    log_message(
+                        f"[{level}] [API FAILURE] {request_method} {request_path} "
+                        f"status={response_status_code} endpoint={func.__name__} reason={type(e).__name__}"
+                    )
                 raise # Re-raise the exception after recording the metrics
             finally:
                 end_time = time.perf_counter()
                 elapsed_time = end_time - start_time
 
                 if measuring == "api":
+                    request = request or kwargs.get("request")
+                    method = getattr(request, "method", kwargs.get("method", request_method))
+                    path = getattr(request, "scope", {}).get("path", "unknown")
                     metadata = EndpointMetaData(
                         recorded_at=datetime.now(timezone.utc),
                         func_name=func.__name__,
-                        method=request_method,
+                        method=method,
                         was_exception=was_exception,
                         response_time=elapsed_time,
                         response_status_code=response_status_code,
                     )
                     _monitoring_service.record_endpoint(metadata)
+                    if method != "GET" or response_status_code >= 400:
+                        level = "ERROR" if response_status_code >= 500 else "WARNING" if response_status_code >= 400 else "INFO"
+                        log_message(
+                            f"[{level}] [API] {method} {path} status={response_status_code} "
+                            f"duration_ms={elapsed_time * 1000:.1f} endpoint={func.__name__}"
+                        )
                 elif measuring == "db":
                     metadata = OperationMetaData(
                         recorded_at=datetime.now(timezone.utc),

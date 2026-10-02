@@ -1,0 +1,27 @@
+name: Shared backend services
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'codex/sync-shared-backend-*'
+
+permissions:
+  contents: read
+
+jobs:
+  shared-services:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt httpx==0.28.1 greenlet==3.5.5
+      - name: Compile backend modules
+        run: python -m compileall -q src config
+      - name: Test shared backend contracts
+        run: python -m unittest tools.tests.test_shared_sessions tools.tests.test_shared_emailing tools.tests.test_shared_outbound_http tools.tests.test_monitoring_contract tools.tests.test_session_routes
